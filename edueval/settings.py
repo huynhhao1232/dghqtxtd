@@ -171,9 +171,20 @@ if USE_S3:
 # Cho phép nhúng media cùng origin (xem trước PDF trong Modal iframe)
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 
-if not DEBUG:
+# Secure cookies only over HTTPS. Set DJANGO_COOKIE_SECURE=0 for HTTP (e.g. IP-only VPS before SSL).
+# Default: True when DEBUG=False (HTTPS), False when DEBUG=True.
+_cookie_secure = os.environ.get('DJANGO_COOKIE_SECURE', '').strip().lower()
+if _cookie_secure in ('1', 'true', 'yes', 'on'):
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+elif _cookie_secure in ('0', 'false', 'no', 'off'):
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+elif not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
+if SESSION_COOKIE_SECURE or CSRF_COOKIE_SECURE:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
