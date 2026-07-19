@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}Thống kê & Kết xuất — EduEval{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Thống kê định lượng</h1>
+            <p class="text-sm text-gray-500 mt-1">Số việc Đạt và lượt trừ theo kỳ · {{ period_label }}</p>
+        </div>
+        <a href="{% url 'manager_export_excel' %}?year={{ year }}&period={{ period }}&scope={{ scope }}"
+           class="inline-flex items-center px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700">
+            <i class="fas fa-file-excel mr-2"></i> Export Excel
+        </a>
+    </div>
+
+    <div class="flex flex-wrap gap-2">
+        <a href="?scope=person&period={{ period }}&year={{ year }}"
+           class="px-4 py-2 rounded-lg text-sm font-medium {% if scope == 'person' %}bg-primary text-white{% else %}bg-white border border-gray-200 text-gray-700 hover:bg-gray-50{% endif %}">
+            Cá nhân
+        </a>
+        <a href="?scope=department&period={{ period }}&year={{ year }}"
+           class="px-4 py-2 rounded-lg text-sm font-medium {% if scope == 'department' %}bg-primary text-white{% else %}bg-white border border-gray-200 text-gray-700 hover:bg-gray-50{% endif %}">
+            Tổ/Nhóm
+        </a>
+    </div>
+
+    <form method="get" class="flex flex-wrap items-end gap-3 bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+        <input type="hidden" name="scope" value="{{ scope }}">
+        <div>
+            <label class="block text-xs font-semibold text-gray-400 uppercase mb-1">
+                {% if period == 'academic_year' %}Năm học bắt đầu{% else %}Năm{% endif %}
+            </label>
+            <select name="year" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                {% if period == 'academic_year' %}
+                    {% for y in academic_years %}
+                    <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}–{{ y|add:1 }}</option>
+                    {% endfor %}
+                {% else %}
+                    {% for y in years %}
+                    <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                {% endif %}
+            </select>
+        </div>
+        <div>
+            <label class="block text-xs font-semibold text-gray-400 uppercase mb-1">Kỳ</label>
+            <select name="period" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                <option value="month" {% if period == 'month' %}selected{% endif %}>Theo tháng</option>
+                <option value="quarter" {% if period == 'quarter' %}selected{% endif %}>Theo quý</option>
+                <option value="academic_year" {% if period == 'academic_year' %}selected{% endif %}>Theo năm học</option>
+            </select>
+        </div>
+        <button type="submit" class="px-4 py-2 bg-primary text-white text-sm rounded-lg hover:bg-blue-800">Lọc</button>
+    </form>
+
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase sticky left-0 bg-gray-50">
+                            {% if scope == 'department' %}Tổ/Nhóm{% else %}Nhân viên{% endif %}
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">
+                            {% if scope == 'department' %}Trưởng tổ{% else %}Phòng ban{% endif %}
+                        </th>
+                        {% for col in columns %}
+                        <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase" colspan="2">{{ col }}</th>
+                        {% endfor %}
+                        <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase" colspan="2">Tổng</th>
+                    </tr>
+                    <tr class="bg-gray-50/80">
+                        <th colspan="2" class="sticky left-0 bg-gray-50"></th>
+                        {% for col in columns %}
+                        <th class="px-2 py-2 text-right text-[10px] font-semibold text-emerald-600 uppercase">Đạt</th>
+                        <th class="px-2 py-2 text-right text-[10px] font-semibold text-rose-500 uppercase">Trừ</th>
+                        {% endfor %}
+                        <th class="px-2 py-2 text-right text-[10px] font-semibold text-emerald-600 uppercase">Đạt</th>
+                        <th class="px-2 py-2 text-right text-[10px] font-semibold text-rose-500 uppercase">Trừ</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% for row in rows %}
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium text-gray-800 sticky left-0 bg-white">{{ row.label }}</td>
+                        <td class="px-4 py-3 text-gray-600">{{ row.sublabel }}</td>
+                        {% for cell in row.cells %}
+                        <td class="px-2 py-3 text-right text-emerald-700">{{ cell.dat_count }}</td>
+                        <td class="px-2 py-3 text-right text-rose-600">{{ cell.penalty_total }}</td>
+                        {% endfor %}
+                        <td class="px-2 py-3 text-right font-bold text-emerald-700">{{ row.dat_total }}</td>
+                        <td class="px-2 py-3 text-right font-bold text-rose-600">{{ row.penalty_total }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="40" class="px-4 py-10 text-center text-gray-400">Chưa có dữ liệu</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

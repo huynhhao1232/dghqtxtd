@@ -1,0 +1,320 @@
+{% extends "base.html" %}
+
+{% block title %}{{ task.title }} — Chi tiết — EduEval{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+            <a href="{% url 'manager_manage_tasks' %}"
+               class="inline-flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-primary transition-colors">
+                <i class="fas fa-arrow-left"></i> Công việc đã giao
+            </a>
+            <h1 class="text-2xl font-bold text-gray-900 mt-2">{{ task.title }}</h1>
+            <p class="text-sm text-gray-500 mt-1">
+                {{ task.get_cycle_display }} · Hạn {{ task.deadline|date:"d/m/Y" }}
+                · Giao bởi {{ task.created_by }}
+            </p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+            {% if task.primary_department %}
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-50 text-blue-700 ring-1 ring-blue-600/15">
+                <i class="fas fa-flag"></i> Chủ trì: {{ task.primary_department.name }}
+            </span>
+            {% for d in task.coordinating_departments.all %}
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-700 ring-1 ring-emerald-600/15">
+                <i class="fas fa-handshake"></i> {{ d.name }}
+            </span>
+            {% endfor %}
+            {% endif %}
+        </div>
+    </div>
+
+    {% if task.description %}
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+        <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">Mô tả</h2>
+        <p class="text-sm text-gray-700 whitespace-pre-line">{{ task.description }}</p>
+    </div>
+    {% endif %}
+
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+            <p class="text-xs font-semibold text-gray-400 uppercase">Tiến độ nộp bài</p>
+            <p class="text-3xl font-bold text-primary mt-1">{{ submitted_count }}/{{ total_count }}</p>
+            <div class="mt-3 h-2 bg-gray-100 rounded-full overflow-hidden">
+                <div class="h-full rounded-full {% if progress_pct >= 100 %}bg-emerald-500{% elif progress_pct >= 50 %}bg-amber-400{% else %}bg-blue-500{% endif %}"
+                     style="width: {{ progress_pct }}%"></div>
+            </div>
+            <p class="text-xs text-gray-400 mt-2">{{ progress_pct }}% đã nộp (chờ duyệt hoặc hoàn thành)</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 sm:col-span-2">
+            <p class="text-xs font-semibold text-gray-400 uppercase mb-3">File đính kèm gốc</p>
+            <div class="flex flex-wrap gap-2">
+                {% for att in task.attachments.all %}
+                <button type="button"
+                        data-file-url="{{ att.file.url }}"
+                        data-file-name="{{ att.original_name }}"
+                        class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm bg-slate-50 text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100">
+                    <i class="fas fa-paperclip text-primary"></i> {{ att.original_name }}
+                </button>
+                {% empty %}
+                <span class="text-sm text-gray-400">Không có file đính kèm</span>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <h2 class="text-base font-semibold text-gray-800">
+                <i class="fas fa-list-check text-primary mr-2"></i>
+                {% if task.is_team_task %}Đánh giá toàn nhiệm vụ{% else %}Bản phân công & nghiệm thu{% endif %}
+            </h2>
+            <span class="text-xs text-gray-400">
+                {% if task.is_team_task %}Chủ trì – Phối hợp{% else %}{{ total_count }} đối tượng{% endif %}
+            </span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead class="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Đối tượng</th>
+                        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Trạng thái</th>
+                        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Minh chứng</th>
+                        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Kết quả</th>
+                        <th class="text-right px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Hành động</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% for a in assignments %}
+                    <tr class="hover:bg-slate-50/70">
+                        <td class="px-5 py-4">
+                            <div class="flex items-center gap-3">
+                                <img src="{{ a.target_avatar_url }}" alt="" class="w-9 h-9 rounded-full object-cover ring-1 ring-gray-200">
+                                <div>
+                                    {% if task.is_team_task %}
+                                    <p class="font-medium text-gray-900">Toàn nhiệm vụ</p>
+                                    <p class="text-[11px] text-blue-600">Đại diện nộp: {{ a.target_display_name }} · Tổ Chủ trì</p>
+                                    {% else %}
+                                    <p class="font-medium text-gray-900">{{ a.target_display_name }}</p>
+                                    {% if a.is_department_target %}
+                                    <p class="text-[11px] text-teal-600">
+                                        Bản nộp tổ
+                                        {% if a.acting_user %} · Đại diện: {{ a.acting_user }}{% endif %}
+                                    </p>
+                                    {% elif a.assignee %}
+                                    <p class="text-[11px] text-gray-400">{{ a.assignee.username }}</p>
+                                    {% endif %}
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-5 py-4">
+                            <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-medium
+                                {% if a.status == 'todo' %}bg-gray-100 text-gray-700
+                                {% elif a.status == 'in_progress' %}bg-blue-100 text-blue-800
+                                {% elif a.status == 'pending_review' %}bg-amber-100 text-amber-800
+                                {% elif a.status == 'completed' %}bg-emerald-100 text-emerald-800
+                                {% elif a.status == 'redo' %}bg-rose-100 text-rose-800
+                                {% else %}bg-gray-100 text-gray-700{% endif %}">
+                                {{ a.get_status_display }}
+                            </span>
+                            {% if a.submitted_at %}
+                            <p class="text-[11px] text-gray-400 mt-1">Nộp: {{ a.submitted_at|date:"d/m/Y H:i" }}</p>
+                            {% endif %}
+                        </td>
+                        <td class="px-5 py-4">
+                            {% if a.proof_file %}
+                            <button type="button"
+                                    data-file-url="{{ a.proof_file.url }}"
+                                    data-file-name="{{ a.proof_display_name }}"
+                                    class="inline-flex items-center gap-1.5 text-primary hover:underline">
+                                <i class="fas fa-eye"></i> {{ a.proof_display_name }}
+                            </button>
+                            {% else %}
+                            <span class="text-gray-400">—</span>
+                            {% endif %}
+                            {% if a.notes %}
+                            <p class="text-[11px] text-gray-500 mt-1 line-clamp-2 whitespace-pre-line">{{ a.notes }}</p>
+                            {% endif %}
+                        </td>
+                        <td class="px-5 py-4">
+                            {% if a.evaluation_result %}
+                            {% if a.evaluation_result == 'DAT' %}
+                            <p class="font-semibold text-emerald-600">Đạt</p>
+                            {% elif a.evaluation_result == 'TRE_BI_TRU_DIEM' %}
+                            <p class="font-semibold text-rose-600">Làm lại &amp; trừ 1</p>
+                            {% else %}
+                            <p class="font-semibold text-amber-600">Yêu cầu làm lại</p>
+                            {% endif %}
+                            {% if a.manager_comment %}
+                            <p class="text-[11px] text-gray-400 mt-0.5 line-clamp-2">{{ a.manager_comment }}</p>
+                            {% endif %}
+                            {% else %}
+                            <span class="text-gray-400">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-5 py-4 text-right">
+                            {% if a.status == 'pending_review' %}
+                            <button type="button"
+                                    class="btn-grade inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-white hover:bg-blue-800"
+                                    data-assignment-id="{{ a.pk }}"
+                                    data-target-name="{% if task.is_team_task %}Toàn nhiệm vụ: {{ task.title|escape }}{% else %}{{ a.target_display_name|escape }}{% endif %}"
+                                    data-action="{% url 'manager_assignment_review' task.pk a.pk %}">
+                                <i class="fas fa-pen-to-square"></i> Nghiệm thu
+                                {% if task.is_team_task %} toàn Task{% endif %}
+                            </button>
+                            {% else %}
+                            <span class="text-xs text-gray-300">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="px-5 py-10 text-center text-gray-400">Chưa có bản phân công</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if task.is_team_task %}
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100">
+            <h2 class="text-base font-semibold text-gray-800">
+                <i class="fas fa-users text-violet-600 mr-2"></i>Đánh giá cá nhân sau nghiệm thu
+            </h2>
+            <p class="text-xs text-gray-500 mt-1">
+                Lãnh đạo đánh giá một lần cho toàn Task. Sau khi hoàn thành, Trưởng tổ Chủ trì đánh giá từng cá nhân.
+            </p>
+        </div>
+        <div class="divide-y divide-gray-100">
+            {% for p in participations %}
+            <div class="px-5 py-3 flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <img src="{{ p.user.avatar_url }}" alt="" class="w-8 h-8 rounded-full object-cover">
+                    <div>
+                        <p class="text-sm font-medium text-gray-800">{{ p.user }}</p>
+                        <p class="text-[11px] text-gray-400">
+                            {{ p.department.name|default:"—" }} · {{ p.get_role_display }}
+                        </p>
+                    </div>
+                </div>
+                {% if p.evaluation == 'DAT' %}
+                <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Đạt</span>
+                {% elif p.evaluation == 'TRE_BI_TRU_DIEM' %}
+                <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-rose-100 text-rose-700">Làm lại &amp; trừ 1</span>
+                {% elif p.evaluation == 'CHO_LAM_LAI' %}
+                <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Yêu cầu làm lại</span>
+                {% else %}
+                <span class="px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500">Chưa đánh giá</span>
+                {% endif %}
+            </div>
+            {% empty %}
+            <p class="px-5 py-8 text-center text-sm text-gray-400">Chưa có cá nhân tham gia nhiệm vụ</p>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{# Modal nghiệm thu 3 mức #}
+<div id="grade-modal" class="hidden fixed inset-0 z-50">
+    <div class="absolute inset-0 bg-black/40" data-close-grade></div>
+    <div class="relative min-h-full flex items-center justify-center p-4">
+        <div class="w-full max-w-lg bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+            <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                    <h3 class="text-base font-semibold text-gray-900">
+                        {% if task.is_team_task %}Đánh giá toàn nhiệm vụ{% else %}Nghiệm thu bản nộp{% endif %}
+                    </h3>
+                    <p id="grade-target-label" class="text-xs text-gray-500 mt-0.5"></p>
+                </div>
+                <button type="button" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100" data-close-grade>
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="grade-form" method="post" action="#" class="p-5 space-y-4">
+                {% csrf_token %}
+                <fieldset>
+                    <legend class="text-sm font-medium text-gray-700 mb-3">Kết quả đánh giá</legend>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <label class="relative cursor-pointer">
+                            <input type="radio" name="evaluation_result" value="DAT" class="peer sr-only" required>
+                            <div class="h-full border-2 border-gray-200 rounded-xl p-3 text-center text-gray-500 hover:bg-gray-50 transition-all peer-checked:border-emerald-500 peer-checked:bg-emerald-50 peer-checked:text-emerald-700">
+                                <i class="fas fa-check-circle text-xl mb-1 block"></i>
+                                <p class="text-sm font-semibold">Đạt</p>
+                                <p class="text-[11px] mt-1 opacity-80">Hoàn thành</p>
+                            </div>
+                        </label>
+                        <label class="relative cursor-pointer">
+                            <input type="radio" name="evaluation_result" value="CHO_LAM_LAI" class="peer sr-only">
+                            <div class="h-full border-2 border-gray-200 rounded-xl p-3 text-center text-gray-500 hover:bg-gray-50 transition-all peer-checked:border-amber-500 peer-checked:bg-amber-50 peer-checked:text-amber-700">
+                                <i class="fas fa-redo text-xl mb-1 block"></i>
+                                <p class="text-sm font-semibold">Làm lại</p>
+                                <p class="text-[11px] mt-1 opacity-80">Không trừ</p>
+                            </div>
+                        </label>
+                        <label class="relative cursor-pointer">
+                            <input type="radio" name="evaluation_result" value="TRE_BI_TRU_DIEM" class="peer sr-only">
+                            <div class="h-full border-2 border-gray-200 rounded-xl p-3 text-center text-gray-500 hover:bg-gray-50 transition-all peer-checked:border-rose-500 peer-checked:bg-rose-50 peer-checked:text-rose-700">
+                                <i class="fas fa-minus-circle text-xl mb-1 block"></i>
+                                <p class="text-sm font-semibold">Làm lại &amp; trừ 1</p>
+                                <p class="text-[11px] mt-1 opacity-80">Trừ thi đua</p>
+                            </div>
+                        </label>
+                    </div>
+                </fieldset>
+                <div>
+                    <label for="id_manager_comment_modal" class="block text-sm font-medium text-gray-700 mb-1.5">Nhận xét</label>
+                    <textarea id="id_manager_comment_modal" name="manager_comment" rows="4"
+                              class="w-full px-4 py-2.5 rounded-lg border border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                              placeholder="Nhận xét của lãnh đạo về chất lượng bài nộp..."></textarea>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" data-close-grade
+                            class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">
+                        Hủy
+                    </button>
+                    <button type="submit"
+                            class="px-4 py-2 rounded-lg text-sm font-medium bg-primary text-white hover:bg-blue-800">
+                        Lưu kết quả
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var modal = document.getElementById('grade-modal');
+    var form = document.getElementById('grade-form');
+    var label = document.getElementById('grade-target-label');
+    if (!modal || !form) return;
+
+    function openModal(action, name) {
+        form.action = action;
+        label.textContent = name || '';
+        modal.classList.remove('hidden');
+        document.body.classList.add('overflow-hidden');
+    }
+    function closeModal() {
+        modal.classList.add('hidden');
+        document.body.classList.remove('overflow-hidden');
+    }
+
+    document.querySelectorAll('.btn-grade').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            openModal(btn.getAttribute('data-action'), btn.getAttribute('data-target-name'));
+        });
+    });
+    modal.querySelectorAll('[data-close-grade]').forEach(function (el) {
+        el.addEventListener('click', closeModal);
+    });
+})();
+</script>
+{% endblock %}

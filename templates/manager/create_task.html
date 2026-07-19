@@ -1,0 +1,610 @@
+{% extends "base.html" %}
+
+{% block title %}Giao việc mới — EduEval{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="mb-6 text-center sm:text-left">
+        <h1 class="text-2xl font-bold text-gray-900">Giao việc mới</h1>
+        <p class="text-sm text-gray-500 mt-1">Phân công cá nhân, Chủ trì — Phối hợp hoặc giao đồng loạt nhiều tổ</p>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-md p-6 sm:p-8">
+        {% if form.non_field_errors %}
+        <div class="mb-5 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
+            {{ form.non_field_errors }}
+        </div>
+        {% endif %}
+
+        <form method="post" id="create-task-form" class="space-y-6" enctype="multipart/form-data">
+            {% csrf_token %}
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">Tên công việc</label>
+                {{ form.title }}
+                {% for e in form.title.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">Mô tả</label>
+                {{ form.description }}
+                {% for e in form.description.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                    <i class="fas fa-paperclip mr-1 text-gray-400"></i> File đính kèm
+                    <span class="text-gray-400 font-normal">(tùy chọn)</span>
+                </label>
+                <div class="rounded-xl border border-dashed border-gray-300 bg-gray-50 hover:border-blue-300 transition p-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                        <button type="button" id="btn-pick-files"
+                                class="inline-flex items-center justify-center px-4 py-2.5 bg-white border border-gray-300 text-sm font-medium rounded-xl text-gray-700 hover:bg-blue-50 hover:border-blue-300 hover:text-primary transition">
+                            <i class="fas fa-cloud-upload-alt mr-2"></i> Chọn file
+                        </button>
+                        <p class="text-xs text-gray-400">
+                            Tối đa <strong>{{ max_attachment_count }}</strong> file,
+                            mỗi file ≤ <strong>{{ max_attachment_mb }}MB</strong>
+                        </p>
+                    </div>
+                    <input type="file" id="attachment-picker" class="hidden" multiple>
+                    {{ form.attachments }}
+                    <ul id="attachment-list" class="mt-3 space-y-2 hidden"></ul>
+                    <p id="attachment-error" class="mt-2 text-xs text-red-600 hidden"></p>
+                </div>
+            </div>
+
+            <!-- Assign mode tabs -->
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Người nhận</label>
+                <div class="flex rounded-xl bg-gray-100 p-1 gap-1" id="assign-tabs">
+                    <button type="button" data-mode="individual"
+                            class="assign-tab flex-1 py-2.5 text-sm font-medium rounded-lg transition
+                                   bg-white text-primary shadow-sm">
+                        <i class="fas fa-user mr-1.5"></i> Giao cho cá nhân
+                    </button>
+                    <button type="button" data-mode="department"
+                            class="assign-tab flex-1 py-2.5 text-sm font-medium rounded-lg transition
+                                   text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-sitemap mr-1.5"></i> Chủ trì — Phối hợp
+                    </button>
+                    <button type="button" data-mode="batch_department"
+                            class="assign-tab flex-1 py-2.5 text-sm font-medium rounded-lg transition
+                                   text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-layer-group mr-1.5"></i> Giao đồng loạt
+                    </button>
+                </div>
+                <div class="hidden">
+                    {% for radio in form.assign_mode %}{{ radio.tag }}{% endfor %}
+                </div>
+
+                <!-- Individual multi-select -->
+                <div id="panel-individual" class="mt-4">
+                    <div class="relative" id="assignee-picker">
+                        <div id="selected-tags" class="flex flex-wrap gap-2 mb-2 min-h-[2px]"></div>
+                        <div class="relative">
+                            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                            <input type="text" id="assignee-search" autocomplete="off"
+                                   placeholder="Tìm và chọn nhân viên..."
+                                   class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl bg-white hover:border-blue-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-sm">
+                        </div>
+                        <div id="assignee-dropdown"
+                             class="hidden absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                        </div>
+                    </div>
+                    <div id="assignee-hidden-inputs"></div>
+                    {% for e in form.assignees.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                </div>
+
+                <!-- Department: Chủ trì + Phối hợp -->
+                <div id="panel-department" class="mt-4 hidden space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                            <i class="fas fa-flag text-blue-600 mr-1"></i> Đơn vị Chủ trì <span class="text-red-500">*</span>
+                        </label>
+                        {{ form.primary_department }}
+                        <p class="mt-1.5 text-xs text-gray-400">
+                            Tổ chủ trì chịu trách nhiệm phân công, nhận minh chứng phối hợp và chốt gửi Lãnh đạo.
+                        </p>
+                        {% for e in form.primary_department.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                            <i class="fas fa-handshake text-emerald-600 mr-1"></i> Đơn vị Phối hợp
+                        </label>
+                        <div id="coord-picker" class="space-y-2">
+                            <div id="coord-tags" class="flex flex-wrap gap-2 min-h-[2px]"></div>
+                            <div class="relative">
+                                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                                <input type="text" id="coord-search" autocomplete="off"
+                                       placeholder="Tìm và chọn tổ phối hợp..."
+                                       class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl bg-white hover:border-emerald-300 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition text-sm">
+                                <div id="coord-dropdown"
+                                     class="hidden absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                                </div>
+                            </div>
+                            <div id="coord-hidden-inputs"></div>
+                        </div>
+                        <p class="mt-1.5 text-xs text-gray-400">{{ form.coordinating_departments.help_text }}</p>
+                        {% for e in form.coordinating_departments.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                    </div>
+                </div>
+
+                <!-- Batch departments: một Task chung, nhiều bản phân công độc lập -->
+                <div id="panel-batch-department" class="mt-4 hidden">
+                    <div id="batch-dept-picker" class="relative">
+                        <div id="batch-dept-field"
+                             class="min-h-[3rem] w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white flex flex-wrap gap-2 items-center cursor-text transition hover:border-blue-300 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
+                            <div id="batch-dept-tags" class="contents"></div>
+                            <input type="text" id="batch-dept-search" autocomplete="off"
+                                   placeholder="Tìm và chọn nhiều Tổ/Nhóm..."
+                                   class="flex-1 min-w-[10rem] outline-none text-sm text-gray-800 placeholder:text-gray-400 bg-transparent py-0.5">
+                        </div>
+                        <div id="batch-dept-dropdown"
+                             class="hidden absolute z-20 mt-1.5 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto py-1">
+                        </div>
+                        <div id="batch-dept-hidden-inputs"></div>
+                    </div>
+                    <p class="mt-1.5 text-xs text-gray-400">
+                        Một nhiệm vụ chung, mỗi Tổ/Nhóm có bản nộp minh chứng và kết quả đánh giá độc lập.
+                    </p>
+                    {% for e in form.batch_departments.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1.5">Thời hạn</label>
+                    <div class="relative">
+                        <i class="fas fa-calendar-alt absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"></i>
+                        {{ form.deadline }}
+                    </div>
+                    {% for e in form.deadline.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1.5">Chu kỳ</label>
+                    {{ form.cycle }}
+                    {% for e in form.cycle.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                </div>
+            </div>
+
+            <div class="flex gap-3 pt-2 border-t border-gray-100">
+                <button type="submit"
+                        class="inline-flex items-center justify-center px-6 py-2.5 bg-primary text-white text-sm font-semibold rounded-xl hover:bg-blue-800 shadow-sm transition">
+                    <i class="fas fa-paper-plane mr-2"></i> Giao việc
+                </button>
+                <a href="{% url 'manager_dashboard' %}"
+                   class="inline-flex items-center px-6 py-2.5 border border-gray-300 text-sm font-medium rounded-xl text-gray-700 hover:bg-gray-50">
+                    Hủy
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var STAFF = {{ staff_options_json|safe }};
+    var selected = new Set({{ selected_assignee_ids|safe }}.map(String));
+    var mode = '{{ form.assign_mode.value|default:"individual" }}';
+
+    var panelIndividual = document.getElementById('panel-individual');
+    var panelDepartment = document.getElementById('panel-department');
+    var panelBatchDepartment = document.getElementById('panel-batch-department');
+    var tabs = document.querySelectorAll('.assign-tab');
+    var searchInput = document.getElementById('assignee-search');
+    var dropdown = document.getElementById('assignee-dropdown');
+    var tagsEl = document.getElementById('selected-tags');
+    var hiddenEl = document.getElementById('assignee-hidden-inputs');
+    var modeRadios = document.querySelectorAll('input[name="assign_mode"]');
+
+    function setMode(m) {
+        mode = m;
+        modeRadios.forEach(function (r) { r.checked = (r.value === m); });
+        tabs.forEach(function (btn) {
+            var active = btn.getAttribute('data-mode') === m;
+            btn.className = 'assign-tab flex-1 py-2.5 text-sm font-medium rounded-lg transition ' +
+                (active ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-700');
+        });
+        panelIndividual.classList.toggle('hidden', m !== 'individual');
+        panelDepartment.classList.toggle('hidden', m !== 'department');
+        panelBatchDepartment.classList.toggle('hidden', m !== 'batch_department');
+    }
+
+    tabs.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            setMode(btn.getAttribute('data-mode'));
+        });
+    });
+
+    function renderTags() {
+        tagsEl.innerHTML = '';
+        hiddenEl.innerHTML = '';
+        STAFF.forEach(function (s) {
+            if (!selected.has(String(s.id))) return;
+            var tag = document.createElement('span');
+            tag.className = 'inline-flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-full bg-blue-50 text-primary text-xs font-medium border border-blue-100';
+            tag.innerHTML =
+                '<img src="' + s.avatar + '" class="h-5 w-5 rounded-full object-cover" alt="">' +
+                '<span>' + s.name + '</span>' +
+                '<button type="button" data-id="' + s.id + '" class="ml-0.5 text-blue-400 hover:text-blue-700 remove-tag">&times;</button>';
+            tagsEl.appendChild(tag);
+
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'assignees';
+            input.value = s.id;
+            hiddenEl.appendChild(input);
+        });
+        tagsEl.querySelectorAll('.remove-tag').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                selected.delete(String(btn.getAttribute('data-id')));
+                renderTags();
+                renderDropdown(searchInput.value);
+            });
+        });
+    }
+
+    function renderDropdown(query) {
+        var q = (query || '').toLowerCase().trim();
+        var html = '';
+        var count = 0;
+        STAFF.forEach(function (s) {
+            if (selected.has(String(s.id))) return;
+            var hay = (s.name + ' ' + s.username + ' ' + s.department).toLowerCase();
+            if (q && hay.indexOf(q) === -1) return;
+            count++;
+            html +=
+                '<button type="button" data-id="' + s.id + '" class="assignee-option w-full flex items-center gap-3 px-3 py-2.5 hover:bg-blue-50 text-left transition">' +
+                '<img src="' + s.avatar + '" class="h-8 w-8 rounded-full object-cover border border-gray-200" alt="">' +
+                '<span class="flex-1 min-w-0">' +
+                '<span class="block text-sm font-medium text-gray-800 truncate">' + s.name + '</span>' +
+                '<span class="block text-xs text-gray-400 truncate">' + (s.department || s.username) + '</span>' +
+                '</span></button>';
+        });
+        if (!count) {
+            html = '<div class="px-4 py-3 text-sm text-gray-400 text-center">Không tìm thấy</div>';
+        }
+        dropdown.innerHTML = html;
+        dropdown.querySelectorAll('.assignee-option').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                selected.add(String(btn.getAttribute('data-id')));
+                searchInput.value = '';
+                renderTags();
+                renderDropdown('');
+                dropdown.classList.add('hidden');
+            });
+        });
+    }
+
+    searchInput.addEventListener('focus', function () {
+        renderDropdown(searchInput.value);
+        dropdown.classList.remove('hidden');
+    });
+    searchInput.addEventListener('input', function () {
+        renderDropdown(searchInput.value);
+        dropdown.classList.remove('hidden');
+    });
+    document.addEventListener('click', function (e) {
+        if (!document.getElementById('assignee-picker').contains(e.target)) {
+            dropdown.classList.add('hidden');
+        }
+    });
+
+    setMode(mode || 'individual');
+    renderTags();
+
+    // ── Coordinating departments tag picker ──
+    var DEPTS = {{ dept_options_json|safe }};
+    var selectedCoords = new Set({{ selected_coord_ids|safe }}.map(String));
+    var primarySelect = document.getElementById('id_primary_department');
+    var coordSearch = document.getElementById('coord-search');
+    var coordDropdown = document.getElementById('coord-dropdown');
+    var coordTags = document.getElementById('coord-tags');
+    var coordHidden = document.getElementById('coord-hidden-inputs');
+
+    function primaryId() {
+        return primarySelect ? String(primarySelect.value || '') : '';
+    }
+
+    function renderCoordTags() {
+        if (!coordTags || !coordHidden) return;
+        coordTags.innerHTML = '';
+        coordHidden.innerHTML = '';
+        DEPTS.forEach(function (d) {
+            if (!selectedCoords.has(String(d.id))) return;
+            if (String(d.id) === primaryId()) {
+                selectedCoords.delete(String(d.id));
+                return;
+            }
+            var tag = document.createElement('span');
+            tag.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 text-xs font-medium border border-emerald-100';
+            tag.innerHTML =
+                '<i class="fas fa-users text-[10px]"></i><span>' + d.name + '</span>' +
+                '<button type="button" data-id="' + d.id + '" class="remove-coord ml-0.5 text-emerald-500 hover:text-emerald-800">&times;</button>';
+            coordTags.appendChild(tag);
+
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'coordinating_departments';
+            input.value = d.id;
+            coordHidden.appendChild(input);
+        });
+        coordTags.querySelectorAll('.remove-coord').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                selectedCoords.delete(String(btn.getAttribute('data-id')));
+                renderCoordTags();
+                renderCoordDropdown(coordSearch.value);
+            });
+        });
+    }
+
+    function renderCoordDropdown(query) {
+        if (!coordDropdown) return;
+        var q = (query || '').toLowerCase().trim();
+        var pid = primaryId();
+        var html = '';
+        var count = 0;
+        DEPTS.forEach(function (d) {
+            if (selectedCoords.has(String(d.id))) return;
+            if (String(d.id) === pid) return;
+            var hay = (d.name + ' ' + (d.leader || '')).toLowerCase();
+            if (q && hay.indexOf(q) === -1) return;
+            count++;
+            html +=
+                '<button type="button" data-id="' + d.id + '" class="coord-option w-full px-3 py-2.5 text-left hover:bg-emerald-50 transition">' +
+                '<span class="block text-sm font-medium text-gray-800">' + d.name + '</span>' +
+                '<span class="block text-xs text-gray-400">' + (d.leader ? 'Trưởng tổ: ' + d.leader : 'Chưa có trưởng tổ') + '</span>' +
+                '</button>';
+        });
+        if (!count) {
+            html = '<div class="px-4 py-3 text-sm text-gray-400 text-center">Không còn tổ phù hợp</div>';
+        }
+        coordDropdown.innerHTML = html;
+        coordDropdown.querySelectorAll('.coord-option').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                selectedCoords.add(String(btn.getAttribute('data-id')));
+                coordSearch.value = '';
+                renderCoordTags();
+                coordDropdown.classList.add('hidden');
+            });
+        });
+    }
+
+    if (coordSearch) {
+        coordSearch.addEventListener('focus', function () {
+            renderCoordDropdown(coordSearch.value);
+            coordDropdown.classList.remove('hidden');
+        });
+        coordSearch.addEventListener('input', function () {
+            renderCoordDropdown(coordSearch.value);
+            coordDropdown.classList.remove('hidden');
+        });
+    }
+    if (primarySelect) {
+        primarySelect.addEventListener('change', function () {
+            selectedCoords.delete(primaryId());
+            renderCoordTags();
+        });
+    }
+    document.addEventListener('click', function (e) {
+        var box = document.getElementById('coord-picker');
+        if (box && !box.contains(e.target) && coordDropdown) {
+            coordDropdown.classList.add('hidden');
+        }
+    });
+    renderCoordTags();
+
+    // ── Batch departments: multi-select → một Task, nhiều bản phân công ──
+    var selectedBatchDepts = new Set(
+        {{ selected_batch_dept_ids|safe }}.map(String)
+    );
+    var batchPicker = document.getElementById('batch-dept-picker');
+    var batchField = document.getElementById('batch-dept-field');
+    var batchSearch = document.getElementById('batch-dept-search');
+    var batchDropdown = document.getElementById('batch-dept-dropdown');
+    var batchTags = document.getElementById('batch-dept-tags');
+    var batchHidden = document.getElementById('batch-dept-hidden-inputs');
+
+    function renderBatchTags() {
+        batchTags.innerHTML = '';
+        batchHidden.innerHTML = '';
+        DEPTS.forEach(function (d) {
+            if (!selectedBatchDepts.has(String(d.id))) return;
+
+            var tag = document.createElement('span');
+            tag.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 text-blue-800 text-xs font-medium border border-blue-100';
+            var icon = document.createElement('i');
+            icon.className = 'fas fa-users text-[10px]';
+            var name = document.createElement('span');
+            name.textContent = d.name;
+            var remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'remove-batch-dept ml-0.5 text-blue-500 hover:text-blue-800';
+            remove.setAttribute('data-id', d.id);
+            remove.innerHTML = '&times;';
+            tag.appendChild(icon);
+            tag.appendChild(name);
+            tag.appendChild(remove);
+            batchTags.appendChild(tag);
+
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'batch_departments';
+            input.value = d.id;
+            batchHidden.appendChild(input);
+        });
+        batchTags.querySelectorAll('.remove-batch-dept').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                selectedBatchDepts.delete(String(btn.getAttribute('data-id')));
+                renderBatchTags();
+                renderBatchDropdown(batchSearch.value);
+            });
+        });
+        batchSearch.placeholder = selectedBatchDepts.size
+            ? 'Thêm Tổ/Nhóm…'
+            : 'Tìm và chọn nhiều Tổ/Nhóm...';
+    }
+
+    function renderBatchDropdown(query) {
+        var q = (query || '').toLowerCase().trim();
+        batchDropdown.innerHTML = '';
+        var count = 0;
+        DEPTS.forEach(function (d) {
+            if (selectedBatchDepts.has(String(d.id))) return;
+            var hay = (d.name + ' ' + (d.leader || '')).toLowerCase();
+            if (q && hay.indexOf(q) === -1) return;
+            count++;
+
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'w-full px-3 py-2.5 text-left hover:bg-blue-50 transition';
+            var title = document.createElement('span');
+            title.className = 'block text-sm font-medium text-gray-800';
+            title.textContent = d.name;
+            var leader = document.createElement('span');
+            leader.className = 'block text-xs text-gray-400';
+            leader.textContent = d.leader
+                ? 'Trưởng tổ: ' + d.leader
+                : 'Chưa có Trưởng tổ';
+            btn.appendChild(title);
+            btn.appendChild(leader);
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                selectedBatchDepts.add(String(d.id));
+                batchSearch.value = '';
+                renderBatchTags();
+                renderBatchDropdown('');
+            });
+            batchDropdown.appendChild(btn);
+        });
+        if (!count) {
+            var empty = document.createElement('div');
+            empty.className = 'px-4 py-3 text-sm text-gray-400 text-center';
+            empty.textContent = 'Không còn tổ phù hợp';
+            batchDropdown.appendChild(empty);
+        }
+        batchDropdown.classList.remove('hidden');
+    }
+
+    if (batchField) {
+        batchField.addEventListener('click', function () {
+            batchSearch.focus();
+            renderBatchDropdown(batchSearch.value);
+        });
+    }
+    if (batchSearch) {
+        batchSearch.addEventListener('focus', function () {
+            renderBatchDropdown(batchSearch.value);
+        });
+        batchSearch.addEventListener('input', function () {
+            renderBatchDropdown(batchSearch.value);
+        });
+    }
+    document.addEventListener('click', function (e) {
+        if (batchPicker && !batchPicker.contains(e.target)) {
+            batchDropdown.classList.add('hidden');
+        }
+    });
+    renderBatchTags();
+
+    // ── Multi-file attachments with size limit + remove ──
+    var MAX_MB = {{ max_attachment_mb }};
+    var MAX_BYTES = MAX_MB * 1024 * 1024;
+    var MAX_COUNT = {{ max_attachment_count }};
+    var fileInput = document.getElementById('id_attachments');
+    var picker = document.getElementById('attachment-picker');
+    var pickBtn = document.getElementById('btn-pick-files');
+    var listEl = document.getElementById('attachment-list');
+    var errEl = document.getElementById('attachment-error');
+    var selectedFiles = [];
+
+    function formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function showError(msg) {
+        errEl.textContent = msg;
+        errEl.classList.toggle('hidden', !msg);
+    }
+
+    function syncInput() {
+        var dt = new DataTransfer();
+        selectedFiles.forEach(function (f) { dt.items.add(f); });
+        fileInput.files = dt.files;
+    }
+
+    function renderFileList() {
+        listEl.innerHTML = '';
+        if (!selectedFiles.length) {
+            listEl.classList.add('hidden');
+            syncInput();
+            return;
+        }
+        listEl.classList.remove('hidden');
+        selectedFiles.forEach(function (file, index) {
+            var li = document.createElement('li');
+            li.className = 'flex items-center gap-3 px-3 py-2 bg-white border border-gray-200 rounded-xl';
+            li.innerHTML =
+                '<i class="fas fa-file text-primary"></i>' +
+                '<div class="flex-1 min-w-0">' +
+                '<p class="text-sm font-medium text-gray-800 truncate">' + file.name + '</p>' +
+                '<p class="text-xs text-gray-400">' + formatSize(file.size) + '</p>' +
+                '</div>' +
+                '<button type="button" data-index="' + index + '" class="remove-file p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Xóa file">' +
+                '<i class="fas fa-times"></i></button>';
+            listEl.appendChild(li);
+        });
+        listEl.querySelectorAll('.remove-file').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                selectedFiles.splice(parseInt(btn.getAttribute('data-index'), 10), 1);
+                showError('');
+                renderFileList();
+            });
+        });
+        syncInput();
+    }
+
+    function addFiles(fileList) {
+        showError('');
+        Array.from(fileList).forEach(function (file) {
+            if (selectedFiles.length >= MAX_COUNT) {
+                showError('Chỉ được đính kèm tối đa ' + MAX_COUNT + ' file.');
+                return;
+            }
+            if (file.size > MAX_BYTES) {
+                showError('File "' + file.name + '" vượt quá ' + MAX_MB + 'MB (' + formatSize(file.size) + ').');
+                return;
+            }
+            var dup = selectedFiles.some(function (f) {
+                return f.name === file.name && f.size === file.size && f.lastModified === file.lastModified;
+            });
+            if (dup) return;
+            selectedFiles.push(file);
+        });
+        renderFileList();
+    }
+
+    if (pickBtn && picker && fileInput) {
+        pickBtn.addEventListener('click', function () { picker.click(); });
+        picker.addEventListener('change', function () {
+            if (picker.files && picker.files.length) {
+                addFiles(picker.files);
+            }
+            picker.value = '';
+        });
+    }
+
+    var formEl = document.getElementById('create-task-form');
+    if (formEl) {
+        formEl.addEventListener('submit', function () { syncInput(); });
+    }
+})();
+</script>
+{% endblock %}

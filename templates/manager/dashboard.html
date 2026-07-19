@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard Lãnh đạo — EduEval{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Tổng quan phòng ban</h1>
+        <p class="text-sm text-gray-500 mt-1">Theo dõi tiến độ và định lượng công việc · NH {{ period_stats.academic_year_label }}</p>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+            <p class="text-xs font-semibold text-gray-400 uppercase">Tháng hiện tại · Đạt</p>
+            <p class="text-3xl font-bold text-emerald-600 mt-1">{{ period_stats.month.dat_count }}</p>
+            <p class="text-xs text-rose-500 mt-1">Tổng lượt trừ: {{ period_stats.month.penalty_total }}</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+            <p class="text-xs font-semibold text-gray-400 uppercase">Quý hiện tại · Đạt</p>
+            <p class="text-3xl font-bold text-emerald-600 mt-1">{{ period_stats.quarter.dat_count }}</p>
+            <p class="text-xs text-rose-500 mt-1">Tổng lượt trừ: {{ period_stats.quarter.penalty_total }}</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+            <p class="text-xs font-semibold text-gray-400 uppercase">Năm học · Đạt</p>
+            <p class="text-3xl font-bold text-emerald-600 mt-1">{{ period_stats.academic_year.dat_count }}</p>
+            <p class="text-xs text-rose-500 mt-1">Tổng lượt trừ: {{ period_stats.academic_year.penalty_total }}</p>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+            <p class="text-xs font-semibold text-gray-400 uppercase">Tỷ lệ hoàn thành</p>
+            <p class="text-3xl font-bold text-primary mt-1">{{ completion_rate }}%</p>
+            <p class="text-xs text-gray-400 mt-1">{{ completed_tasks }}/{{ total_tasks }} việc</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+            <p class="text-xs font-semibold text-gray-400 uppercase">Chờ duyệt</p>
+            <p class="text-3xl font-bold text-amber-500 mt-1">{{ pending_count }}</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+            <p class="text-xs font-semibold text-gray-400 uppercase">Nhân viên</p>
+            <p class="text-3xl font-bold text-gray-800 mt-1">{{ staff_count }}</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm flex items-center">
+            <a href="{% url 'manager_create_task' %}" class="w-full text-center py-3 bg-primary text-white rounded-lg font-medium hover:bg-blue-800 transition-colors">
+                <i class="fas fa-plus mr-2"></i> Giao việc mới
+            </a>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+        <h2 class="text-base font-semibold text-gray-800 mb-4"><i class="fas fa-clock text-red-400 mr-2"></i>Danh sách trễ hạn</h2>
+        <ul class="divide-y divide-gray-100">
+            {% for a in overdue_list %}
+            <li class="py-3 flex justify-between items-start gap-2">
+                <div>
+                    <p class="text-sm font-medium text-gray-800">{{ a.task.title }}</p>
+                    <p class="text-xs text-gray-400">{{ a.target_display_name }} · Hạn {{ a.task.deadline|date:"d/m/Y" }}</p>
+                </div>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600 shrink-0">{{ a.get_status_display }}</span>
+            </li>
+            {% empty %}
+            <li class="py-6 text-center text-sm text-gray-400">Không có việc trễ hạn</li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+{% endblock %}

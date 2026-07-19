@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}Việc của tôi — EduEval{% endblock %}
+
+{% block content %}
+<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+
+    <!-- Card Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 border-b border-gray-100">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Việc của tôi</h1>
+            <p class="text-sm text-gray-500 mt-1">Danh sách công việc được phân công</p>
+        </div>
+        <form method="get" class="flex items-center">
+            <label for="status-filter" class="sr-only">Lọc trạng thái</label>
+            <select id="status-filter"
+                    name="status"
+                    onchange="this.form.submit()"
+                    class="px-4 py-2.5 min-w-[180px] border border-gray-200 rounded-xl text-sm text-gray-700 bg-white
+                           hover:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition">
+                <option value="">Tất cả trạng thái</option>
+                {% for value, label in status_choices %}
+                <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </form>
+    </div>
+
+    <!-- Modern Data Table -->
+    <div class="overflow-x-auto">
+        <table class="min-w-full">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Công việc</th>
+                    <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Người giao</th>
+                    <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Thời hạn</th>
+                    <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Chu kỳ</th>
+                    <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Trạng thái</th>
+                    <th scope="col" class="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Kết quả</th>
+                    <th scope="col" class="px-6 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Hành động</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in assignments %}
+                <tr class="border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
+                    <!-- Công việc -->
+                    <td class="px-6 py-4">
+                        <div class="flex flex-col gap-1">
+                            <span class="font-medium text-gray-900">{{ a.task.title }}</span>
+                            {% if a.task.is_subtask and a.task.parent_task %}
+                            <span class="inline-flex items-center gap-1 w-fit px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 ring-1 ring-inset ring-slate-500/15">
+                                <i class="fas fa-sitemap text-[10px]"></i> Từ: {{ a.task.parent_task.title }}
+                            </span>
+                            {% endif %}
+                            {% if a.is_department_target and a.assignee_department %}
+                            <span class="inline-flex items-center gap-1 w-fit px-2 py-0.5 rounded-md text-[11px] font-medium bg-teal-50 text-teal-700 ring-1 ring-inset ring-teal-600/15">
+                                <i class="fas fa-users text-[10px]"></i> Bản nộp của tổ: {{ a.assignee_department.name }}
+                            </span>
+                            {% elif a.task.primary_department %}
+                            <span class="inline-flex items-center gap-1 text-xs text-blue-600">
+                                <i class="fas fa-flag"></i> {{ a.task.primary_department.name }}
+                                {% if a.task.delegated_updater_id == request.user.id %}
+                                <i class="fas fa-crown text-amber-500" title="Được ủy quyền báo cáo"></i>
+                                {% endif %}
+                            </span>
+                            {% endif %}
+                        </div>
+                    </td>
+
+                    <!-- Người giao -->
+                    <td class="px-6 py-4 text-sm text-gray-600">
+                        {{ a.task.created_by }}
+                    </td>
+
+                    <!-- Thời hạn -->
+                    <td class="px-6 py-4 text-sm {% if a.is_overdue and a.status != 'completed' %}text-red-600 font-medium{% else %}text-gray-600{% endif %}">
+                        {{ a.task.deadline|date:"d/m/Y" }}
+                    </td>
+
+                    <!-- Chu kỳ -->
+                    <td class="px-6 py-4 text-sm text-gray-600">
+                        {{ a.task.get_cycle_display }}
+                    </td>
+
+                    <!-- Trạng thái (Badges) -->
+                    <td class="px-6 py-4">
+                        {% if a.is_overdue and a.status != 'completed' and a.status != 'pending_review' %}
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                            Quá hạn
+                        </span>
+                        {% elif a.status == 'todo' %}
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                            Chưa làm
+                        </span>
+                        {% elif a.status == 'in_progress' %}
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                            Đang làm
+                        </span>
+                        {% elif a.status == 'pending_review' %}
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                            Chờ duyệt
+                        </span>
+                        {% elif a.status == 'completed' %}
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                            Hoàn thành
+                        </span>
+                        {% elif a.status == 'redo' %}
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                            Yêu cầu làm lại
+                        </span>
+                        {% else %}
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                            {{ a.get_status_display }}
+                        </span>
+                        {% endif %}
+                    </td>
+
+                    <!-- Kết quả -->
+                    <td class="px-6 py-4 text-sm font-semibold text-gray-800">
+                        {% if a.evaluation_result == 'DAT' %}
+                        <span class="text-emerald-600">Đạt</span>
+                        {% elif a.evaluation_result == 'TRE_BI_TRU_DIEM' %}
+                        <span class="text-rose-600">Làm lại &amp; trừ 1</span>
+                        {% elif a.evaluation_result == 'CHO_LAM_LAI' %}
+                        <span class="text-amber-600">Yêu cầu làm lại</span>
+                        {% else %}
+                        —
+                        {% endif %}
+                    </td>
+
+                    <!-- Hành động -->
+                    <td class="px-6 py-4 text-right">
+                        <a href="{% url 'staff_task_detail' a.pk %}"
+                           class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700
+                                  bg-white border border-gray-200 rounded-lg
+                                  hover:border-blue-500 hover:text-blue-600 transition-colors">
+                            <i class="fas fa-eye"></i>
+                            Xem
+                        </a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="8" class="px-6 py-16 text-center text-gray-400">
+                        <i class="fas fa-inbox text-3xl mb-3 block text-gray-300"></i>
+                        Không có công việc nào
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+
+{% block title %}Nghiệm thu — {{ task.title }}{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto space-y-5">
+
+    <!-- Back + Title -->
+    <div>
+        <a href="{% url 'manager_review_queue' %}"
+           class="inline-flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-primary transition-colors">
+            <i class="fas fa-arrow-left"></i>
+            Quay lại hàng đợi
+        </a>
+        <h1 class="text-2xl font-bold text-gray-900 mt-2">Nghiệm thu công việc</h1>
+        <p class="text-sm text-gray-500 mt-1">{{ task.title }}</p>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-5 gap-5">
+
+        <!-- ========== Card 1: Thông tin bài nộp ========== -->
+        <div class="xl:col-span-2 bg-gray-50 rounded-xl p-5 border border-gray-100 space-y-5">
+            <h2 class="text-sm font-semibold text-gray-800 uppercase tracking-wide">
+                <i class="fas fa-inbox text-primary mr-1.5"></i>Thông tin bài nộp
+            </h2>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <p class="text-xs text-gray-500 uppercase tracking-wide">Đối tượng</p>
+                    <p class="mt-1 text-sm font-medium text-gray-900">{{ assignment.target_display_name }}</p>
+                    {% if assignment.is_department_target %}
+                    <p class="text-xs text-teal-600 mt-0.5">
+                        <i class="fas fa-users"></i> Bản nộp của tổ
+                    </p>
+                    {% elif task.primary_department %}
+                    <p class="text-xs text-blue-600 mt-0.5">
+                        <i class="fas fa-flag"></i> Chủ trì: {{ task.primary_department.name }}
+                    </p>
+                    {% endif %}
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase tracking-wide">Chu kỳ</p>
+                    <p class="mt-1 text-sm font-medium text-gray-900">{{ task.get_cycle_display }}</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase tracking-wide">Thời hạn</p>
+                    <p class="mt-1 text-sm font-medium text-gray-900">{{ task.deadline|date:"d/m/Y" }}</p>
+                </div>
+                <div>
+                    <p class="text-xs text-gray-500 uppercase tracking-wide">Nộp lúc</p>
+                    <p class="mt-1 text-sm font-medium text-gray-900">{{ assignment.submitted_at|date:"d/m/Y H:i"|default:"—" }}</p>
+                </div>
+            </div>
+
+            {% if participations %}
+            <div>
+                <p class="text-xs text-gray-500 uppercase tracking-wide mb-2">Đánh giá nội bộ (Trưởng tổ)</p>
+                <ul class="space-y-1.5">
+                    {% for p in participations %}
+                    <li class="flex items-center justify-between text-sm bg-white border border-gray-100 rounded-lg px-3 py-2">
+                        <span class="text-gray-800">{{ p.user }}</span>
+                        {% if p.evaluation == 'DAT' %}
+                        <span class="text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">Đạt</span>
+                        {% elif p.evaluation == 'TRE_BI_TRU_DIEM' %}
+                        <span class="text-xs font-medium text-rose-700 bg-rose-50 px-2 py-0.5 rounded">Làm lại &amp; trừ 1</span>
+                        {% elif p.evaluation == 'CHO_LAM_LAI' %}
+                        <span class="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded">Yêu cầu làm lại</span>
+                        {% else %}
+                        <span class="text-xs text-gray-400">Chưa đánh giá</span>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            {% if assignment.notes %}
+            <div>
+                <p class="text-xs text-gray-500 uppercase tracking-wide mb-1.5">Ghi chú nhân viên</p>
+                <div class="bg-white border border-gray-200 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-line">
+                    {{ assignment.notes }}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if assignment.proof_file %}
+            <div>
+                <p class="text-xs text-gray-500 uppercase tracking-wide mb-2">Minh chứng</p>
+                <button type="button"
+                        data-file-url="{{ assignment.proof_file.url }}"
+                        data-file-name="{{ assignment.proof_display_name }}"
+                        class="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2.5
+                               hover:border-blue-500 hover:bg-blue-50/40 transition-colors group text-left">
+                    <div class="w-9 h-9 rounded-lg bg-blue-50 text-primary flex items-center justify-center shrink-0 group-hover:bg-blue-100">
+                        <i class="fas fa-paperclip"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-medium text-gray-800 truncate">{{ assignment.proof_display_name }}</p>
+                        <p class="text-xs text-gray-400">Nhấn để xem trước</p>
+                    </div>
+                    <i class="fas fa-eye text-gray-400 group-hover:text-primary text-sm"></i>
+                </button>
+            </div>
+            {% endif %}
+
+            {% if task.attachments.exists %}
+            <div>
+                <p class="text-xs text-gray-500 uppercase tracking-wide mb-2">File đính kèm (lúc giao)</p>
+                <ul class="space-y-2">
+                    {% for att in task.attachments.all %}
+                    <li>
+                        <button type="button"
+                                data-file-url="{{ att.file.url }}"
+                                data-file-name="{{ att.display_name }}"
+                                class="w-full flex items-center gap-3 bg-white border border-gray-200 rounded-lg px-3 py-2.5
+                                       hover:border-blue-500 hover:bg-blue-50/40 transition-colors group text-left">
+                            <div class="w-8 h-8 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center shrink-0 group-hover:bg-blue-50 group-hover:text-primary">
+                                <i class="fas fa-file-alt text-sm"></i>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <p class="text-sm font-medium text-gray-800 truncate">{{ att.display_name }}</p>
+                                <p class="text-xs text-gray-400">{{ att.size_display }} · Nhấn để xem trước</p>
+                            </div>
+                            <i class="fas fa-eye text-gray-400 group-hover:text-primary text-sm"></i>
+                        </button>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- ========== Card 2: Nghiệm thu ========== -->
+        <div class="xl:col-span-3 bg-white shadow-sm rounded-xl border border-gray-100 p-6">
+            <h2 class="text-base font-semibold text-gray-800 mb-5">
+                <i class="fas fa-clipboard-check text-primary mr-2"></i>Nghiệm thu
+            </h2>
+
+            <form method="post" class="space-y-6" id="review-form">
+                {% csrf_token %}
+
+                <fieldset>
+                    <legend class="text-sm font-medium text-gray-700 mb-3">Kết quả đánh giá</legend>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <label class="relative cursor-pointer">
+                            <input type="radio" name="evaluation_result" value="DAT" class="peer sr-only"
+                                   {% if form.evaluation_result.value == 'DAT' %}checked{% endif %} required>
+                            <div class="h-full border-2 border-gray-200 rounded-xl p-4 text-center text-gray-500
+                                        hover:bg-gray-50 transition-all
+                                        peer-checked:border-emerald-500 peer-checked:bg-emerald-50 peer-checked:text-emerald-700
+                                        peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-400">
+                                <i class="fas fa-check-circle text-2xl mb-2 block"></i>
+                                <p class="text-sm font-semibold">Đạt</p>
+                                <p class="text-xs mt-1 opacity-80">Ghi nhận hoàn thành</p>
+                            </div>
+                        </label>
+                        <label class="relative cursor-pointer">
+                            <input type="radio" name="evaluation_result" value="CHO_LAM_LAI" class="peer sr-only"
+                                   {% if form.evaluation_result.value == 'CHO_LAM_LAI' %}checked{% endif %}>
+                            <div class="h-full border-2 border-gray-200 rounded-xl p-4 text-center text-gray-500
+                                        hover:bg-gray-50 transition-all
+                                        peer-checked:border-amber-500 peer-checked:bg-amber-50 peer-checked:text-amber-700
+                                        peer-focus-visible:ring-2 peer-focus-visible:ring-amber-400">
+                                <i class="fas fa-redo text-2xl mb-2 block"></i>
+                                <p class="text-sm font-semibold">Làm lại</p>
+                                <p class="text-xs mt-1 opacity-80">Không trừ điểm thi đua</p>
+                            </div>
+                        </label>
+                        <label class="relative cursor-pointer">
+                            <input type="radio" name="evaluation_result" value="TRE_BI_TRU_DIEM" class="peer sr-only"
+                                   {% if form.evaluation_result.value == 'TRE_BI_TRU_DIEM' %}checked{% endif %}>
+                            <div class="h-full border-2 border-gray-200 rounded-xl p-4 text-center text-gray-500
+                                        hover:bg-gray-50 transition-all
+                                        peer-checked:border-rose-500 peer-checked:bg-rose-50 peer-checked:text-rose-700
+                                        peer-focus-visible:ring-2 peer-focus-visible:ring-rose-400">
+                                <i class="fas fa-minus-circle text-2xl mb-2 block"></i>
+                                <p class="text-sm font-semibold">Làm lại &amp; trừ 1</p>
+                                <p class="text-xs mt-1 opacity-80">Trừ 1 điểm thi đua</p>
+                            </div>
+                        </label>
+                    </div>
+                    {% for e in form.evaluation_result.errors %}
+                    <p class="mt-2 text-xs text-red-600">{{ e }}</p>
+                    {% endfor %}
+                </fieldset>
+
+                <!-- Nhận xét -->
+                <div>
+                    <label for="id_manager_comment" class="block text-sm font-medium text-gray-700 mb-1.5">Nhận xét</label>
+                    {{ form.manager_comment }}
+                    {% for e in form.manager_comment.errors %}
+                    <p class="mt-1 text-xs text-red-600">{{ e }}</p>
+                    {% endfor %}
+                </div>
+
+                <!-- Action -->
+                <div class="flex justify-end gap-3 pt-2">
+                    <a href="{% url 'manager_review_queue' %}"
+                       class="inline-flex items-center px-5 py-2.5 rounded-lg text-sm font-medium
+                              bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors">
+                        Hủy
+                    </a>
+                    <button type="submit"
+                            class="inline-flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium
+                                   bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-colors">
+                        <i class="fas fa-check-circle"></i>
+                        Lưu kết quả
+                    </button>
+                </div>
+            </form>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

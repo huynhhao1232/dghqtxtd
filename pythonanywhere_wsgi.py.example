@@ -1,0 +1,22 @@
+# Copy nội dung này vào file WSGI trên PythonAnywhere
+# (Web tab → WSGI configuration file), rồi sửa yourusername.
+#
+# Path project = thư mục chứa manage.py (ví dụ ~/DGVC).
+
+import os
+import sys
+
+path = '/home/yourusername/DGVC'
+if path not in sys.path:
+    sys.path.insert(0, path)
+
+os.environ['DJANGO_SETTINGS_MODULE'] = 'edueval.settings'
+os.environ['DJANGO_DEBUG'] = '0'
+os.environ['DJANGO_ALLOWED_HOSTS'] = 'yourusername.pythonanywhere.com'
+os.environ['DJANGO_CSRF_TRUSTED_ORIGINS'] = 'https://yourusername.pythonanywhere.com'
+# Tạo key mới: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+os.environ['DJANGO_SECRET_KEY'] = ' thay-bang-secret-key-moi '
+
+from django.core.wsgi import get_wsgi_application
+
+application = get_wsgi_application()

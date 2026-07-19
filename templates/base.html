@@ -1,0 +1,497 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Hệ thống Đánh giá Hiệu quả Công việc{% endblock %}</title>
+    <link rel="icon" type="image/png" href="{% static 'images/school-logo.png' %}">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#1d4ed8',
+                        secondary: '#f3f4f6',
+                        danger: '#ef4444',
+                        success: '#10b981',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans antialiased overflow-hidden">
+    <!-- Overlay cho sidebar mobile -->
+    <div id="sidebar-overlay" class="fixed inset-0 bg-black/40 z-30 hidden md:hidden"></div>
+
+    <div class="flex h-screen w-full overflow-hidden">
+        
+        <!-- ================= SIDEBAR ================= -->
+        <aside id="sidebar"
+               class="fixed inset-y-0 left-0 w-64 bg-white border-r border-gray-200 flex flex-col z-40
+                      transform -translate-x-full transition-transform duration-200 ease-in-out
+                      md:static md:translate-x-0 md:flex md:h-full md:shrink-0 md:z-20">
+            <div class="relative h-16 flex items-center justify-center px-4 border-b border-gray-200">
+                <a href="{% url 'home' %}" class="flex items-center" aria-label="Trang chủ">
+                    <img src="{% static 'images/school-logo.png' %}"
+                         alt="Logo Trung tâm GDNN-GDTX Thành phố Thủ Đức"
+                         class="w-10 h-10 rounded-full object-contain shrink-0">
+                </a>
+                <button type="button" id="sidebar-close-btn" class="absolute right-4 md:hidden text-gray-400 hover:text-gray-600 p-1" aria-label="Đóng menu">
+                    <i class="fas fa-times text-lg"></i>
+                </button>
+            </div>
+            
+            <nav class="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+                {% if user.is_manager %}
+                <a href="{% url 'manager_dashboard' %}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {% if request.resolver_match.url_name == 'manager_dashboard' %}bg-blue-50 text-primary{% else %}text-gray-600 hover:bg-gray-100 hover:text-gray-900{% endif %}">
+                    <i class="fas fa-home w-6"></i> Tổng quan
+                </a>
+                <p class="px-3 pt-4 pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Quản lý</p>
+                <a href="{% url 'manager_manage_tasks' %}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {% if request.resolver_match.url_name == 'manager_manage_tasks' or request.resolver_match.url_name == 'manager_task_edit' %}bg-blue-50 text-primary{% else %}text-gray-600 hover:bg-gray-100 hover:text-gray-900{% endif %}">
+                    <i class="fas fa-list-check w-6"></i> Công việc đã giao
+                </a>
+                <a href="{% url 'manager_review_queue' %}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {% if request.resolver_match.url_name == 'manager_review_queue' or request.resolver_match.url_name == 'manager_review_task' %}bg-blue-50 text-primary{% else %}text-gray-600 hover:bg-gray-100 hover:text-gray-900{% endif %}">
+                    <i class="fas fa-check-double w-6"></i> Hàng đợi duyệt
+                </a>
+                <a href="{% url 'manager_departments' %}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {% if request.resolver_match.url_name == 'manager_departments' %}bg-blue-50 text-primary{% else %}text-gray-600 hover:bg-gray-100 hover:text-gray-900{% endif %}">
+                    <i class="fas fa-sitemap w-6"></i> Quản lý Tổ/Nhóm
+                </a>
+                <a href="{% url 'manager_staff' %}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {% if request.resolver_match.url_name == 'manager_staff' %}bg-blue-50 text-primary{% else %}text-gray-600 hover:bg-gray-100 hover:text-gray-900{% endif %}">
+                    <i class="fas fa-users w-6"></i> Quản lý Viên chức
+                </a>
+                {% else %}
+                <a href="{% url 'staff_dashboard' %}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {% if request.resolver_match.url_name == 'staff_dashboard' %}bg-blue-50 text-primary{% else %}text-gray-600 hover:bg-gray-100 hover:text-gray-900{% endif %}">
+                    <i class="fas fa-home w-6"></i> Tổng quan
+                </a>
+                <p class="px-3 pt-4 pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Cá nhân</p>
+                <a href="{% url 'staff_my_tasks' %}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {% if request.resolver_match.url_name == 'staff_task_detail' or request.resolver_match.url_name == 'staff_my_tasks' %}bg-blue-50 text-primary{% else %}text-gray-600 hover:bg-gray-100 hover:text-gray-900{% endif %}">
+                    <i class="fas fa-clipboard-list w-6"></i> Việc của tôi
+                </a>
+                {% endif %}
+
+                {% if sidebar_departments %}
+                <p class="px-3 pt-4 pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Nhóm của tôi</p>
+                {% for dept in sidebar_departments %}
+                <a href="{% url 'department_interaction' dept.pk %}"
+                   class="flex items-center px-3 py-2 text-sm font-medium rounded-md {% if request.resolver_match.url_name == 'department_interaction' and request.resolver_match.kwargs.dept_id|stringformat:'s' == dept.pk|stringformat:'s' %}bg-blue-50 text-primary{% else %}text-gray-600 hover:bg-gray-100 hover:text-gray-900{% endif %}">
+                    <i class="fas fa-users-cog w-6 shrink-0"></i>
+                    <span class="truncate">{{ dept.name }}</span>
+                </a>
+                {% endfor %}
+                {% endif %}
+
+                <p class="px-3 pt-4 pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Báo cáo</p>
+                {% if user.is_manager %}
+                <a href="{% url 'manager_statistics' %}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {% if request.resolver_match.url_name == 'manager_statistics' %}bg-blue-50 text-primary{% else %}text-gray-600 hover:bg-gray-100 hover:text-gray-900{% endif %}">
+                    <i class="fas fa-chart-bar w-6"></i> Thống kê định lượng
+                </a>
+                {% else %}
+                <a href="{% url 'staff_dashboard' %}" class="flex items-center px-3 py-2 text-sm font-medium text-gray-600 rounded-md hover:bg-gray-100 hover:text-gray-900">
+                    <i class="fas fa-chart-bar w-6"></i> Kết quả cá nhân
+                </a>
+                {% endif %}
+            </nav>
+            
+            <div class="p-4 border-t border-gray-200">
+                <a href="{% url 'logout' %}" class="flex items-center px-3 py-2 text-sm font-medium text-red-600 rounded-md hover:bg-red-50 transition-colors">
+                    <i class="fas fa-sign-out-alt w-6"></i> Đăng xuất
+                </a>
+            </div>
+        </aside>
+
+        <!-- ================= MAIN CONTENT AREA ================= -->
+        <div class="flex-1 flex flex-col min-w-0 min-h-0 bg-gray-50 overflow-hidden">
+            
+            <header class="h-16 shrink-0 bg-white border-b border-gray-200 flex items-center justify-between px-4 lg:px-8 z-10 shadow-sm">
+                <div class="flex items-center md:hidden">
+                    <button type="button" id="mobile-menu-btn" class="text-gray-500 hover:text-gray-700 focus:outline-none p-2 -ml-2" aria-label="Mở menu">
+                        <i class="fas fa-bars text-xl"></i>
+                    </button>
+                </div>
+
+                <div class="hidden md:flex flex-1 max-w-md">
+                    <form method="get" action="{% if user.is_manager %}{% url 'manager_review_queue' %}{% else %}{% url 'staff_my_tasks' %}{% endif %}" class="relative w-full text-gray-400 focus-within:text-gray-600">
+                        <div class="absolute inset-y-0 left-0 flex items-center pointer-events-none pl-3">
+                            <i class="fas fa-search"></i>
+                        </div>
+                        <input type="text" name="q" value="{{ request.GET.q }}" class="block w-full h-10 pl-10 pr-3 py-2 border border-gray-300 rounded-lg leading-5 bg-gray-50 placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:border-primary focus:ring-1 focus:ring-primary sm:text-sm transition-shadow" placeholder="Tìm kiếm công việc, nhân sự...">
+                    </form>
+                </div>
+
+                <div class="ml-4 flex items-center space-x-4 sm:space-x-6">
+                    
+                    <!-- Notification Bell -->
+                    <div class="relative" id="notif-wrapper">
+                        <button type="button" id="notif-btn" class="relative p-2 text-gray-400 rounded-full hover:text-gray-600 hover:bg-gray-100 focus:outline-none transition-colors">
+                            <i class="fas fa-bell text-xl"></i>
+                            {% if unread_notification_count %}
+                            <span class="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[1.1rem] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold ring-2 ring-white">
+                                {{ unread_notification_count }}
+                            </span>
+                            {% endif %}
+                        </button>
+                        <div id="notif-dropdown" class="hidden absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden z-50">
+                            <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                                <span class="text-sm font-semibold text-gray-800">Thông báo</span>
+                                <span class="text-xs text-gray-500">{{ unread_notification_count }} chưa đọc</span>
+                            </div>
+                            <ul class="max-h-80 overflow-y-auto divide-y divide-gray-50">
+                                {% for n in recent_notifications %}
+                                <li>
+                                    <a href="{% url 'notification_read' n.pk %}" class="block px-4 py-3 hover:bg-gray-50 transition-colors {% if not n.is_read %}bg-blue-50/50{% endif %}">
+                                        <p class="text-sm text-gray-800 {% if not n.is_read %}font-semibold{% endif %}">{{ n.message }}</p>
+                                        <p class="text-xs text-gray-400 mt-1">{{ n.created_at|date:"d/m/Y H:i" }}</p>
+                                    </a>
+                                </li>
+                                {% empty %}
+                                <li class="px-4 py-6 text-center text-sm text-gray-400">Không có thông báo</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </div>
+
+                    <!-- Profile Dropdown -->
+                    <div class="relative" id="profile-wrapper">
+                        <button type="button" id="profile-btn" class="relative flex items-center space-x-2 cursor-pointer p-1 rounded-lg hover:bg-gray-50 transition-colors">
+                            <img class="h-9 w-9 rounded-full object-cover border border-gray-200" src="{{ user.avatar_url }}" alt="Avatar">
+                            <div class="hidden sm:flex sm:flex-col sm:items-start">
+                                <span class="text-sm font-bold text-gray-700">{{ user.get_full_name|default:user.username }}</span>
+                                <span class="text-xs font-medium text-gray-500">{% if user.is_manager %}Quản lý{% else %}Nhân viên{% endif %}</span>
+                            </div>
+                            <i class="fas fa-chevron-down text-xs text-gray-400 hidden sm:block ml-1"></i>
+                        </button>
+                        <div id="profile-dropdown" class="hidden absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-gray-200 py-1 z-50">
+                            <a href="{% url 'profile' %}" class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                <i class="fas fa-user w-5 text-gray-400"></i> Trang cá nhân
+                            </a>
+                            <a href="{% url 'logout' %}" class="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50">
+                                <i class="fas fa-sign-out-alt w-5"></i> Đăng xuất
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <main class="flex-1 min-h-0 overflow-y-auto p-4 md:p-6 lg:p-8">
+                {% if messages %}
+                    <div class="mb-4">
+                        {% for message in messages %}
+                        <div class="p-4 rounded-lg flex items-center {% if message.tags == 'error' %}bg-red-50 text-red-800 border border-red-200{% elif message.tags == 'info' %}bg-blue-50 text-blue-800 border border-blue-200{% else %}bg-green-50 text-green-800 border border-green-200{% endif %} mb-2 shadow-sm">
+                            <i class="fas {% if message.tags == 'error' %}fa-exclamation-circle{% elif message.tags == 'info' %}fa-info-circle{% else %}fa-check-circle{% endif %} mr-2"></i>
+                            <span class="text-sm font-medium">{{ message }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+
+                {% block content %}
+                {% endblock %}
+            </main>
+            
+        </div>
+    </div>
+
+    <!-- ========== Modal xem trước file ========== -->
+    <div id="file-preview-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+        <div class="bg-white w-full max-w-5xl h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden">
+            <!-- Header -->
+            <div class="shrink-0 border-b border-gray-200 px-5 py-3 space-y-2">
+                <div class="flex items-center justify-between gap-3">
+                    <h3 id="file-preview-title" class="text-sm sm:text-base font-semibold text-gray-800 truncate min-w-0">
+                        Xem trước tài liệu
+                    </h3>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <a id="file-preview-download"
+                           href="#"
+                           download
+                           class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg px-4 py-2 transition-colors">
+                            <i class="fas fa-download"></i>
+                            Tải xuống
+                        </a>
+                        <button type="button" id="file-preview-close"
+                                class="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                aria-label="Đóng">
+                            <i class="fas fa-times text-lg"></i>
+                        </button>
+                    </div>
+                </div>
+                <p id="file-preview-office-note"
+                   class="hidden text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    <i class="fas fa-exclamation-triangle mr-1"></i>
+                    Lưu ý: Tính năng xem trước file Office chỉ hoạt động khi ứng dụng được đưa lên server Online, không hoạt động trên localhost.
+                </p>
+            </div>
+            <!-- Body -->
+            <div id="file-preview-body" class="bg-gray-100 flex-1 overflow-auto w-full relative p-4">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var sidebar = document.getElementById('sidebar');
+            var overlay = document.getElementById('sidebar-overlay');
+            var openBtn = document.getElementById('mobile-menu-btn');
+            var closeBtn = document.getElementById('sidebar-close-btn');
+
+            function openSidebar() {
+                if (!sidebar) return;
+                sidebar.classList.remove('-translate-x-full');
+                if (overlay) overlay.classList.remove('hidden');
+            }
+
+            function closeSidebar() {
+                if (!sidebar) return;
+                sidebar.classList.add('-translate-x-full');
+                if (overlay) overlay.classList.add('hidden');
+            }
+
+            if (openBtn) openBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                openSidebar();
+            });
+            if (closeBtn) closeBtn.addEventListener('click', closeSidebar);
+            if (overlay) overlay.addEventListener('click', closeSidebar);
+
+            if (sidebar) {
+                sidebar.querySelectorAll('a').forEach(function (link) {
+                    link.addEventListener('click', function () {
+                        if (window.innerWidth < 768) closeSidebar();
+                    });
+                });
+            }
+
+            function toggle(btnId, dropId, wrapperId) {
+                var btn = document.getElementById(btnId);
+                var drop = document.getElementById(dropId);
+                var wrap = document.getElementById(wrapperId);
+                if (!btn || !drop) return;
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var willOpen = drop.classList.contains('hidden');
+                    document.querySelectorAll('#notif-dropdown, #profile-dropdown').forEach(function (el) {
+                        el.classList.add('hidden');
+                    });
+                    if (willOpen) drop.classList.remove('hidden');
+                });
+                document.addEventListener('click', function (e) {
+                    if (wrap && !wrap.contains(e.target)) drop.classList.add('hidden');
+                });
+            }
+            toggle('notif-btn', 'notif-dropdown', 'notif-wrapper');
+            toggle('profile-btn', 'profile-dropdown', 'profile-wrapper');
+
+            // ── File Preview Modal ──
+            var modal = document.getElementById('file-preview-modal');
+            var modalBody = document.getElementById('file-preview-body');
+            var modalTitle = document.getElementById('file-preview-title');
+            var modalDownload = document.getElementById('file-preview-download');
+            var modalClose = document.getElementById('file-preview-close');
+            var officeNote = document.getElementById('file-preview-office-note');
+
+            var currentBlobUrl = null;
+
+            function revokeBlob() {
+                if (currentBlobUrl) {
+                    try { URL.revokeObjectURL(currentBlobUrl); } catch (err) {}
+                    currentBlobUrl = null;
+                }
+            }
+
+            function absoluteUrl(url) {
+                if (!url) return '';
+                if (/^https?:\/\//i.test(url)) return url;
+                // Mã hóa từng segment để hỗ trợ tên file Unicode (VD: Cơ_sở_2.pdf)
+                var path = (url.charAt(0) === '/' ? url : '/' + url);
+                try {
+                    var u = new URL(path, window.location.origin);
+                    u.pathname = u.pathname.split('/').map(function (seg) {
+                        return encodeURIComponent(decodeURIComponent(seg));
+                    }).join('/');
+                    return u.href;
+                } catch (err) {
+                    return window.location.origin + path;
+                }
+            }
+
+            function getExtension(nameOrUrl) {
+                var clean = (nameOrUrl || '').split('?')[0].split('#')[0];
+                var parts = clean.split('.');
+                return parts.length > 1 ? parts.pop().toLowerCase() : '';
+            }
+
+            function showLoading() {
+                modalBody.className = 'bg-gray-100 flex-1 overflow-auto w-full relative p-4 flex items-center justify-center';
+                modalBody.innerHTML =
+                    '<div class="text-center text-gray-500 text-sm">' +
+                    '<i class="fas fa-spinner fa-spin text-2xl mb-2"></i>' +
+                    '<p>Đang tải xem trước...</p></div>';
+            }
+
+            function showUnsupported() {
+                modalBody.className = 'bg-gray-100 flex-1 overflow-auto w-full relative p-4 flex items-center justify-center';
+                modalBody.innerHTML =
+                    '<div class="text-center max-w-md px-6 py-10 bg-white rounded-xl border border-gray-200 shadow-sm">' +
+                    '<i class="fas fa-exclamation-circle text-4xl text-gray-300 mb-3"></i>' +
+                    '<p class="text-sm font-medium text-gray-700">Định dạng file không hỗ trợ xem trước.</p>' +
+                    '<p class="text-xs text-gray-400 mt-1">Vui lòng tải xuống để xem.</p>' +
+                    '</div>';
+            }
+
+            function showError(msg) {
+                modalBody.className = 'bg-gray-100 flex-1 overflow-auto w-full relative p-4 flex items-center justify-center';
+                modalBody.innerHTML =
+                    '<div class="text-center max-w-md px-6 py-10 bg-white rounded-xl border border-red-100 shadow-sm">' +
+                    '<i class="fas fa-exclamation-triangle text-4xl text-red-300 mb-3"></i>' +
+                    '<p class="text-sm font-medium text-gray-700">' + (msg || 'Không thể tải xem trước.') + '</p>' +
+                    '<p class="text-xs text-gray-400 mt-1">Hãy dùng nút Tải xuống để mở file.</p>' +
+                    '</div>';
+            }
+
+            function renderPreview(url, fileName) {
+                var abs = absoluteUrl(url);
+                var ext = getExtension(fileName || url);
+                officeNote.classList.add('hidden');
+                revokeBlob();
+                modalBody.innerHTML = '';
+
+                if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].indexOf(ext) !== -1) {
+                    var img = document.createElement('img');
+                    img.src = abs;
+                    img.alt = fileName || 'Preview';
+                    img.className = 'max-w-full max-h-full mx-auto object-contain rounded-lg shadow-sm';
+                    img.onerror = function () { showError('Không thể hiển thị ảnh.'); };
+                    modalBody.className = 'bg-gray-100 flex-1 overflow-auto w-full relative p-4 flex items-center justify-center';
+                    modalBody.appendChild(img);
+                    return;
+                }
+
+                if (ext === 'pdf') {
+                    // Fetch → blob URL để tránh bị chặn X-Frame-Options / lỗi iframe localhost
+                    showLoading();
+                    fetch(abs, { credentials: 'same-origin' })
+                        .then(function (res) {
+                            if (!res.ok) throw new Error('HTTP ' + res.status);
+                            return res.blob();
+                        })
+                        .then(function (blob) {
+                            revokeBlob();
+                            currentBlobUrl = URL.createObjectURL(blob);
+                            modalBody.className = 'bg-gray-100 flex-1 overflow-hidden w-full relative p-0';
+                            modalBody.innerHTML = '';
+                            var embed = document.createElement('embed');
+                            embed.src = currentBlobUrl;
+                            embed.type = 'application/pdf';
+                            embed.className = 'w-full h-full';
+                            modalBody.appendChild(embed);
+                        })
+                        .catch(function () {
+                            showError('Không thể tải file PDF để xem trước.');
+                        });
+                    return;
+                }
+
+                if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].indexOf(ext) !== -1) {
+                    officeNote.classList.remove('hidden');
+                    // localhost: Office Online không truy cập được → hiện hướng dẫn rõ ràng
+                    if (/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)) {
+                        modalBody.className = 'bg-gray-100 flex-1 overflow-auto w-full relative p-4 flex items-center justify-center';
+                        modalBody.innerHTML =
+                            '<div class="text-center max-w-lg px-6 py-10 bg-white rounded-xl border border-amber-100 shadow-sm">' +
+                            '<i class="fas fa-file-excel text-4xl text-amber-400 mb-3"></i>' +
+                            '<p class="text-sm font-medium text-gray-700">Không xem trước được file Office trên localhost.</p>' +
+                            '<p class="text-xs text-gray-500 mt-2 leading-relaxed">Microsoft Office Online cần URL công khai. Hãy dùng <strong>Tải xuống</strong> để mở file, hoặc deploy lên server online để bật xem trước.</p>' +
+                            '</div>';
+                        return;
+                    }
+                    modalBody.className = 'bg-gray-100 flex-1 overflow-hidden w-full relative p-0';
+                    var iframeOffice = document.createElement('iframe');
+                    iframeOffice.src = 'https://view.officeapps.live.com/op/embed.aspx?src=' + encodeURIComponent(abs);
+                    iframeOffice.className = 'w-full h-full border-0';
+                    iframeOffice.setAttribute('frameborder', '0');
+                    iframeOffice.title = fileName || 'Office Preview';
+                    modalBody.appendChild(iframeOffice);
+                    return;
+                }
+
+                showUnsupported();
+            }
+
+            function displayName(nameOrUrl) {
+                var raw = (nameOrUrl || '').split('?')[0].split('#')[0];
+                var base = raw.split('/').pop() || raw;
+                try { return decodeURIComponent(base); } catch (err) { return base; }
+            }
+
+            function openPreview(url, fileName) {
+                if (!modal) return;
+                var pretty = displayName(fileName || url) || 'File';
+                modalTitle.textContent = 'Xem trước tài liệu: ' + pretty;
+                modalDownload.href = absoluteUrl(url);
+                modalDownload.setAttribute('download', pretty);
+                renderPreview(url, fileName || pretty);
+                modal.classList.remove('hidden');
+                document.body.classList.add('overflow-hidden');
+            }
+
+            function closePreview() {
+                if (!modal) return;
+                modal.classList.add('hidden');
+                revokeBlob();
+                modalBody.innerHTML = '';
+                officeNote.classList.add('hidden');
+                document.body.classList.remove('overflow-hidden');
+            }
+
+            if (modalClose) modalClose.addEventListener('click', closePreview);
+            if (modal) {
+                modal.addEventListener('click', function (e) {
+                    if (e.target === modal) closePreview();
+                });
+            }
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
+                    closePreview();
+                }
+            });
+
+            document.addEventListener('click', function (e) {
+                var btn = e.target.closest('[data-file-url]');
+                if (!btn) return;
+                e.preventDefault();
+                openPreview(btn.getAttribute('data-file-url'), btn.getAttribute('data-file-name') || '');
+            });
+        })();
+    </script>
+    {% block extra_js %}{% endblock %}
+
+    {% if user.is_manager %}
+    <a href="{% url 'manager_create_task' %}"
+       aria-label="Giao việc mới"
+       title="Giao việc mới"
+       class="group fixed bottom-6 right-6 z-50 h-12 w-12 px-0
+              flex items-center justify-center overflow-hidden rounded-full
+              bg-blue-600 text-white opacity-60 shadow-md
+              transition-all duration-300
+              hover:w-36 hover:px-4 hover:bg-blue-700 hover:opacity-100 hover:shadow-lg
+              focus:outline-none focus-visible:w-36 focus-visible:px-4 focus-visible:opacity-100
+              focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2">
+        <i class="fas fa-plus shrink-0" aria-hidden="true"></i>
+        <span class="max-w-0 overflow-hidden whitespace-nowrap text-sm font-medium opacity-0
+                     transition-all duration-300
+                     group-hover:ml-2 group-hover:max-w-xs group-hover:opacity-100
+                     group-focus-visible:ml-2 group-focus-visible:max-w-xs group-focus-visible:opacity-100">
+            Giao việc
+        </span>
+    </a>
+    {% endif %}
+</body>
+</html>

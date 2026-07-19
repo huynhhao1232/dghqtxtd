@@ -1,0 +1,56 @@
+{% if items %}
+<ul class="divide-y divide-gray-100 border border-gray-100 rounded-xl overflow-hidden">
+    {% for p in items %}
+    <li class="flex items-center gap-3 px-4 py-3 bg-white hover:bg-gray-50/80">
+        <img src="{{ p.user.avatar_url }}" alt="" class="w-9 h-9 rounded-full object-cover shrink-0">
+        <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-gray-800 truncate">
+                {{ p.user }}
+                {% if p.department %}<span class="text-xs text-gray-400 font-normal">· {{ p.department.name }}</span>{% endif %}
+            </p>
+            <p class="text-xs text-gray-400">
+                {% if p.evaluation == 'pass' %}<span class="text-emerald-600">Đã đánh giá: Đạt</span>
+                {% elif p.evaluation == 'fail' %}<span class="text-rose-600">Đã đánh giá: Không đạt</span>
+                {% else %}Chưa đánh giá nội bộ{% endif %}
+            </p>
+        </div>
+        {% if can_manage and assignment.status != 'completed' and assignment.status != 'pending_review' %}
+        <div class="flex items-center gap-1.5 shrink-0">
+            {% if show_delegate %}
+                {% if task.delegated_updater_id == p.user_id %}
+                <form method="post" action="{% url 'staff_task_set_delegate' my_assignment.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="clear" value="1">
+                    <button type="submit" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-amber-100 text-amber-800 hover:bg-amber-200">
+                        <i class="fas fa-crown"></i> Đang ủy quyền
+                    </button>
+                </form>
+                {% else %}
+                <form method="post" action="{% url 'staff_task_set_delegate' my_assignment.pk %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="user_id" value="{{ p.user_id }}">
+                    <button type="submit" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-600 bg-gray-100 hover:bg-amber-50 hover:text-amber-700">
+                        <i class="fas fa-crown"></i> Ủy quyền
+                    </button>
+                </form>
+                {% endif %}
+            {% endif %}
+            <form method="post" action="{% url 'staff_task_remove_member' my_assignment.pk %}" onsubmit="return confirm('Gỡ thành viên này?');">
+                {% csrf_token %}
+                <input type="hidden" name="user_id" value="{{ p.user_id }}">
+                <button type="submit" class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-rose-600 hover:bg-rose-50">
+                    <i class="fas fa-times"></i>
+                </button>
+            </form>
+        </div>
+        {% elif task.delegated_updater_id == p.user_id %}
+        <span class="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 px-2 py-1 rounded-lg"><i class="fas fa-crown"></i> Ủy quyền</span>
+        {% endif %}
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<div class="text-center py-6 px-4 border border-dashed border-gray-200 rounded-xl">
+    <p class="text-sm text-gray-500">Chưa có thành viên trong nhóm này.</p>
+</div>
+{% endif %}

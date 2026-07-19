@@ -1,0 +1,459 @@
+{% extends "base.html" %}
+
+{% block title %}Quản lý Viên chức — EduEval{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Quản lý Viên chức</h1>
+            <p class="text-sm text-gray-500 mt-1">Tạo tài khoản, phân tổ nhóm và quản lý nhân sự</p>
+        </div>
+        <button type="button" id="btn-open-create"
+                class="inline-flex items-center px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-xl hover:bg-blue-800 shadow-sm transition">
+            <i class="fas fa-user-plus mr-2"></i> Tạo tài khoản
+        </button>
+    </div>
+
+    <!-- Toolbar filter -->
+    <form method="get" class="flex flex-col sm:flex-row sm:items-center gap-3 bg-white rounded-2xl border border-gray-200 shadow-sm p-4">
+        <div class="relative flex-1">
+            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+            <input type="text" name="q" value="{{ q }}" placeholder="Tìm theo tên, email, chức vụ..."
+                   class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl text-sm hover:border-blue-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+        </div>
+        <select name="department"
+                class="px-4 py-2.5 border border-gray-300 rounded-xl text-sm hover:border-blue-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                onchange="this.form.submit()">
+            <option value="">Tất cả Tổ/Nhóm</option>
+            {% for d in departments %}
+            <option value="{{ d.pk }}" {% if dept_filter == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-xl hover:bg-blue-800">
+            <i class="fas fa-filter mr-1"></i> Lọc
+        </button>
+    </form>
+
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Viên chức</th>
+                        <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tổ/Nhóm</th>
+                        <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Chức vụ</th>
+                        <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Trạng thái</th>
+                        <th class="px-5 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Hành động</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% for s in staff_list %}
+                    <tr class="hover:bg-gray-50/80 transition-colors">
+                        <td class="px-5 py-3.5">
+                            <div class="flex items-center gap-3">
+                                <img src="{{ s.avatar_url }}" alt="" class="h-10 w-10 rounded-full object-cover border border-gray-200">
+                                <div>
+                                    <p class="font-medium text-gray-900">{{ s.full_name_vn }}</p>
+                                    <p class="text-xs text-gray-400">@{{ s.username }}{% if s.email %} · {{ s.email }}{% endif %}</p>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-5 py-3.5">
+                            {% with depts=s.my_departments.all %}
+                            {% if depts %}
+                            <div class="flex flex-wrap gap-1">
+                                {% for d in depts %}
+                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ring-1 ring-inset {{ d.badge_classes }}">
+                                    {{ d.name }}
+                                </span>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <span class="text-gray-400 text-xs">Chưa phân tổ</span>
+                            {% endif %}
+                            {% endwith %}
+                        </td>
+                        <td class="px-5 py-3.5 text-gray-600">{{ s.position|default:"—" }}</td>
+                        <td class="px-5 py-3.5">
+                            {% if s.is_active %}
+                            <span class="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Đang hoạt động
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center gap-1.5 text-xs font-medium text-red-600">
+                                <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Đã khóa
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="px-5 py-3.5 text-right">
+                            <div class="inline-flex items-center gap-2">
+                                <a href="?action=edit&staff_id={{ s.pk }}{% if dept_filter %}&department={{ dept_filter }}{% endif %}{% if q %}&q={{ q }}{% endif %}"
+                                   class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-50 text-primary hover:bg-blue-100">
+                                    <i class="fas fa-pen mr-1"></i> Sửa
+                                </a>
+                                <form method="post" class="inline">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="toggle_active">
+                                    <input type="hidden" name="staff_id" value="{{ s.pk }}">
+                                    <button type="submit"
+                                            class="px-3 py-1.5 text-xs font-medium rounded-lg {% if s.is_active %}bg-red-50 text-red-600 hover:bg-red-100{% else %}bg-emerald-50 text-emerald-700 hover:bg-emerald-100{% endif %}">
+                                        <i class="fas {% if s.is_active %}fa-lock{% else %}fa-lock-open{% endif %} mr-1"></i>
+                                        {% if s.is_active %}Khóa{% else %}Mở khóa{% endif %}
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="px-5 py-12 text-center text-gray-400">Không tìm thấy viên chức nào</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Slide-over: Tạo tài khoản -->
+<div id="create-panel" class="{% if open_create %}{% else %}hidden{% endif %} fixed inset-0 z-50 overflow-hidden">
+    <div class="absolute inset-0 bg-black/40" id="create-panel-overlay"></div>
+    <div class="absolute inset-y-0 right-0 w-full max-w-md bg-white shadow-2xl flex flex-col">
+        <div class="h-16 px-6 border-b border-gray-200 flex items-center justify-between shrink-0">
+            <h2 class="text-lg font-semibold text-gray-900">
+                <i class="fas fa-user-plus text-primary mr-2"></i>Tạo tài khoản mới
+            </h2>
+            <button type="button" id="create-panel-close" class="text-gray-400 hover:text-gray-600 p-1">
+                <i class="fas fa-times text-lg"></i>
+            </button>
+        </div>
+        <form method="post" class="flex-1 overflow-y-auto p-6 space-y-4">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create">
+
+            {% if create_form.non_field_errors %}
+            <div class="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
+                {{ create_form.non_field_errors }}
+            </div>
+            {% endif %}
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">{{ create_form.role.label }}</label>
+                {{ create_form.role }}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">Tên đăng nhập *</label>
+                {{ create_form.username }}
+                {% for e in create_form.username.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">Họ và tên *</label>
+                {{ create_form.full_name }}
+                {% for e in create_form.full_name.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
+                {{ create_form.email }}
+                {% for e in create_form.email.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">Số điện thoại</label>
+                {{ create_form.phone }}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">Tổ/Nhóm</label>
+                {{ create_form.departments }}
+                {% if create_form.departments.help_text %}
+                <p class="mt-1 text-xs text-gray-400">{{ create_form.departments.help_text }}</p>
+                {% endif %}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">Chức vụ</label>
+                {{ create_form.position }}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">Mật khẩu *</label>
+                {{ create_form.password1 }}
+                {% for e in create_form.password1.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">Xác nhận mật khẩu *</label>
+                {{ create_form.password2 }}
+                {% for e in create_form.password2.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+
+            <div class="pt-4 flex gap-3 sticky bottom-0 bg-white pb-1">
+                <button type="submit" class="flex-1 py-2.5 bg-primary text-white text-sm font-medium rounded-xl hover:bg-blue-800">
+                    <i class="fas fa-check mr-1"></i> Tạo tài khoản
+                </button>
+                <a href="{% url 'manager_staff' %}" class="flex-1 text-center py-2.5 border border-gray-300 text-sm font-medium rounded-xl text-gray-700 hover:bg-gray-50">
+                    Hủy
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if open_edit and edit_form %}
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/40" onclick="location.href='{% url 'manager_staff' %}'"></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white z-10">
+            <h3 class="text-lg font-semibold text-gray-900">Sửa viên chức — {{ edit_user }}</h3>
+            <a href="{% url 'manager_staff' %}" class="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition">
+                <i class="fas fa-times"></i>
+            </a>
+        </div>
+        <form method="post" class="p-6 space-y-5" id="edit-staff-form">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="edit">
+            <input type="hidden" name="staff_id" value="{{ edit_user.pk }}">
+
+            <div>
+                <label for="id_full_name" class="block text-sm font-medium text-gray-700 mb-1.5">Họ và tên *</label>
+                {{ edit_form.full_name }}
+                {% for e in edit_form.full_name.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+
+            <div>
+                <label for="id_email" class="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
+                {{ edit_form.email }}
+                {% for e in edit_form.email.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+
+            <div>
+                <label for="id_phone" class="block text-sm font-medium text-gray-700 mb-1.5">Số điện thoại</label>
+                {{ edit_form.phone }}
+                {% for e in edit_form.phone.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+
+            {# Multi-select Tag Input — Tổ / Nhóm #}
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">Tổ / Nhóm</label>
+                <div id="dept-tag-picker" class="relative">
+                    <div id="dept-field"
+                         class="min-h-[3rem] w-full px-3 py-2.5 border border-gray-300 rounded-lg bg-white flex flex-wrap gap-2 items-center cursor-text transition hover:border-blue-300 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
+                        <div id="dept-tags" class="contents"></div>
+                        <input type="text" id="dept-search" autocomplete="off"
+                               placeholder="Chọn hoặc tìm tổ / nhóm..."
+                               class="flex-1 min-w-[8rem] outline-none text-sm text-gray-800 placeholder:text-gray-400 bg-transparent py-0.5">
+                    </div>
+                    <div id="dept-dropdown"
+                         class="hidden absolute z-30 mt-1.5 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-52 overflow-y-auto py-1 origin-top transition">
+                    </div>
+                    <div id="dept-hidden-inputs"></div>
+                </div>
+                {% for e in edit_form.departments.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+
+            <div>
+                <label for="id_position" class="block text-sm font-medium text-gray-700 mb-1.5">Chức vụ</label>
+                {{ edit_form.position }}
+                {% for e in edit_form.position.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+
+            {# iOS-style Toggle — Trạng thái #}
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Trạng thái tài khoản</label>
+                <div class="flex items-center gap-3">
+                    {{ edit_form.is_active }}
+                    <button type="button" id="active-toggle-btn" role="switch" aria-checked="true"
+                            class="relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-400 bg-green-500"
+                            aria-label="Bật/tắt tài khoản">
+                        <span id="active-toggle-knob"
+                              class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-6"></span>
+                    </button>
+                    <span id="active-toggle-label" class="text-sm font-medium text-green-700">Tài khoản đang hoạt động</span>
+                </div>
+                {% for e in edit_form.is_active.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+
+            <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                <a href="{% url 'manager_staff' %}"
+                   class="inline-flex items-center px-5 py-2.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition">
+                    Hủy
+                </a>
+                <button type="submit"
+                        class="inline-flex items-center px-5 py-2.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition">
+                    <i class="fas fa-save mr-1.5"></i> Lưu
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var panel = document.getElementById('create-panel');
+    var openBtn = document.getElementById('btn-open-create');
+    var closeBtn = document.getElementById('create-panel-close');
+    var overlay = document.getElementById('create-panel-overlay');
+    function openPanel() { if (panel) panel.classList.remove('hidden'); }
+    function closePanel() { window.location.href = '{% url "manager_staff" %}'; }
+    if (openBtn) openBtn.addEventListener('click', openPanel);
+    if (closeBtn) closeBtn.addEventListener('click', closePanel);
+    if (overlay) overlay.addEventListener('click', closePanel);
+})();
+
+{% if open_edit and edit_form %}
+(function () {
+    // ── Tag Input: Tổ / Nhóm ──
+    var DEPTS = {{ edit_dept_options_json|safe }};
+    var selected = new Set({{ edit_selected_dept_ids|safe }}.map(String));
+    var field = document.getElementById('dept-field');
+    var tagsEl = document.getElementById('dept-tags');
+    var search = document.getElementById('dept-search');
+    var dropdown = document.getElementById('dept-dropdown');
+    var hiddenEl = document.getElementById('dept-hidden-inputs');
+    var picker = document.getElementById('dept-tag-picker');
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, function (c) {
+            return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+        });
+    }
+
+    function syncHidden() {
+        hiddenEl.innerHTML = '';
+        selected.forEach(function (id) {
+            var inp = document.createElement('input');
+            inp.type = 'hidden';
+            inp.name = 'departments';
+            inp.value = id;
+            hiddenEl.appendChild(inp);
+        });
+    }
+
+    function renderTags() {
+        tagsEl.innerHTML = '';
+        DEPTS.forEach(function (d) {
+            if (!selected.has(String(d.id))) return;
+            var tag = document.createElement('span');
+            tag.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800';
+            tag.innerHTML =
+                '<span>' + escapeHtml(d.name) + '</span>' +
+                '<button type="button" data-id="' + d.id + '" class="dept-remove ml-0.5 text-blue-600 hover:text-blue-900 leading-none" aria-label="Xóa">' +
+                '<i class="fas fa-times text-[10px]"></i></button>';
+            tagsEl.appendChild(tag);
+        });
+        tagsEl.querySelectorAll('.dept-remove').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                selected.delete(String(btn.getAttribute('data-id')));
+                renderTags();
+                renderDropdown(search.value);
+            });
+        });
+        syncHidden();
+        search.placeholder = selected.size ? 'Thêm tổ…' : 'Chọn hoặc tìm tổ / nhóm...';
+    }
+
+    function available(q) {
+        q = (q || '').trim().toLowerCase();
+        return DEPTS.filter(function (d) {
+            if (selected.has(String(d.id))) return false;
+            if (!q) return true;
+            return d.name.toLowerCase().indexOf(q) !== -1;
+        });
+    }
+
+    function renderDropdown(q) {
+        var list = available(q);
+        dropdown.innerHTML = '';
+        if (!list.length) {
+            dropdown.innerHTML = '<p class="px-3 py-2.5 text-sm text-gray-400">Không còn tổ nào để chọn</p>';
+            dropdown.classList.remove('hidden');
+            return;
+        }
+        list.forEach(function (d) {
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'w-full text-left px-3 py-2.5 text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-800 transition flex items-center gap-2';
+            btn.innerHTML = '<i class="fas fa-users text-gray-400 text-xs w-4"></i><span>' + escapeHtml(d.name) + '</span>';
+            btn.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                selected.add(String(d.id));
+                search.value = '';
+                renderTags();
+                renderDropdown('');
+            });
+            dropdown.appendChild(btn);
+        });
+        dropdown.classList.remove('hidden');
+    }
+
+    function openDropdown() {
+        renderDropdown(search.value);
+    }
+
+    function closeDropdown() {
+        dropdown.classList.add('hidden');
+    }
+
+    if (field) {
+        field.addEventListener('click', function () {
+            search.focus();
+            openDropdown();
+        });
+    }
+    if (search) {
+        search.addEventListener('focus', openDropdown);
+        search.addEventListener('input', function () { renderDropdown(search.value); });
+        search.addEventListener('keydown', function (e) {
+            if (e.key === 'Backspace' && !search.value && selected.size) {
+                var ids = Array.from(selected);
+                selected.delete(ids[ids.length - 1]);
+                renderTags();
+                renderDropdown('');
+            }
+            if (e.key === 'Escape') closeDropdown();
+        });
+    }
+    document.addEventListener('click', function (e) {
+        if (picker && !picker.contains(e.target)) closeDropdown();
+    });
+    renderTags();
+
+    // ── Toggle Switch: is_active ──
+    var checkbox = document.getElementById('id_is_active');
+    var toggleBtn = document.getElementById('active-toggle-btn');
+    var knob = document.getElementById('active-toggle-knob');
+    var label = document.getElementById('active-toggle-label');
+
+    function syncToggleUI() {
+        if (!checkbox || !toggleBtn) return;
+        var on = checkbox.checked;
+        toggleBtn.setAttribute('aria-checked', on ? 'true' : 'false');
+        if (on) {
+            toggleBtn.classList.remove('bg-gray-300');
+            toggleBtn.classList.add('bg-green-500');
+            knob.classList.remove('translate-x-1');
+            knob.classList.add('translate-x-6');
+            label.textContent = 'Tài khoản đang hoạt động';
+            label.className = 'text-sm font-medium text-green-700';
+        } else {
+            toggleBtn.classList.remove('bg-green-500');
+            toggleBtn.classList.add('bg-gray-300');
+            knob.classList.remove('translate-x-6');
+            knob.classList.add('translate-x-1');
+            label.textContent = 'Tài khoản đang bị khóa';
+            label.className = 'text-sm font-medium text-red-600';
+        }
+    }
+
+    if (toggleBtn && checkbox) {
+        toggleBtn.addEventListener('click', function () {
+            checkbox.checked = !checkbox.checked;
+            syncToggleUI();
+        });
+        syncToggleUI();
+    }
+})();
+{% endif %}
+</script>
+{% endblock %}

@@ -1,0 +1,491 @@
+{% extends "base.html" %}
+
+{% block title %}Quản lý Tổ/Nhóm — EduEval{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-900">Quản lý Tổ/Nhóm</h1>
+            <p class="text-sm text-gray-500 mt-1">Tổ chức nhân sự theo phòng ban / tổ chuyên môn</p>
+        </div>
+        <button type="button" id="btn-open-create"
+                class="inline-flex items-center px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-xl hover:bg-blue-800 shadow-sm transition">
+            <i class="fas fa-plus mr-2"></i> Thêm Tổ/Nhóm mới
+        </button>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        {% for dept in departments %}
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 hover:shadow-md transition">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ring-1 ring-inset {{ dept.badge_classes }}">
+                        {{ dept.name }}
+                    </span>
+                    <p class="mt-3 text-sm text-gray-500 line-clamp-2">{{ dept.description|default:"Chưa có mô tả" }}</p>
+                </div>
+                <div class="w-10 h-10 rounded-xl bg-blue-50 text-primary flex items-center justify-center shrink-0">
+                    <i class="fas fa-users"></i>
+                </div>
+            </div>
+            <div class="mt-4 space-y-2 text-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-gray-400">Trưởng tổ</span>
+                    <span class="font-medium text-gray-800">{{ dept.leader|default:"—" }}</span>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-gray-400">Thành viên</span>
+                    <span class="font-semibold text-primary" data-dept-count="{{ dept.pk }}">{{ dept.active_members }}</span>
+                </div>
+            </div>
+            <div class="mt-5 pt-4 border-t border-gray-100 flex items-center gap-2">
+                <a href="{% url 'department_interaction' dept.pk %}"
+                   class="flex-1 text-center text-xs font-medium px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100">
+                    <i class="fas fa-comments mr-1"></i> Tương tác
+                </a>
+                <a href="?action=members&dept_id={{ dept.pk }}"
+                   class="text-center text-xs font-medium px-3 py-2 rounded-lg bg-gray-50 text-gray-700 hover:bg-gray-100"
+                   title="Xem thành viên">
+                    <i class="fas fa-eye"></i>
+                </a>
+                <a href="?action=edit&dept_id={{ dept.pk }}"
+                   class="text-xs font-medium px-3 py-2 rounded-lg bg-blue-50 text-primary hover:bg-blue-100">
+                    <i class="fas fa-pen"></i>
+                </a>
+                <form method="post" onsubmit="return confirm('Xóa tổ {{ dept.name }}?');">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="dept_id" value="{{ dept.pk }}">
+                    <button type="submit" class="text-xs font-medium px-3 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% empty %}
+        <div class="col-span-full bg-white rounded-2xl border border-dashed border-gray-300 p-12 text-center">
+            <i class="fas fa-sitemap text-3xl text-gray-300 mb-3"></i>
+            <p class="text-gray-500 text-sm">Chưa có Tổ/Nhóm nào. Hãy thêm tổ đầu tiên.</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Slide-over: Create / Edit -->
+<div id="dept-panel" class="{% if open_create or open_edit %}{% else %}hidden{% endif %} fixed inset-0 z-50 overflow-hidden">
+    <div class="absolute inset-0 bg-black/40" id="dept-panel-overlay"></div>
+    <div class="absolute inset-y-0 right-0 w-full max-w-md bg-white shadow-2xl flex flex-col">
+        <div class="h-16 px-6 border-b border-gray-200 flex items-center justify-between">
+            <h2 class="text-lg font-semibold text-gray-900">
+                {% if open_edit %}Sửa Tổ/Nhóm{% else %}Thêm Tổ/Nhóm mới{% endif %}
+            </h2>
+            <button type="button" id="dept-panel-close" class="text-gray-400 hover:text-gray-600 p-1">
+                <i class="fas fa-times text-lg"></i>
+            </button>
+        </div>
+        <form method="post" class="flex-1 overflow-y-auto p-6 space-y-4">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="{% if open_edit %}edit{% else %}create{% endif %}">
+            {% if open_edit %}<input type="hidden" name="dept_id" value="{{ edit_dept.pk }}">{% endif %}
+            {% with active_form=edit_form|default:form %}
+            {% for field in active_form %}
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">{{ field.label }}</label>
+                {{ field }}
+                {% for e in field.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+            </div>
+            {% endfor %}
+            {% if active_form.non_field_errors %}
+            <div class="text-sm text-red-600">{{ active_form.non_field_errors }}</div>
+            {% endif %}
+            {% endwith %}
+            <div class="pt-4 flex gap-3">
+                <button type="submit" class="flex-1 py-2.5 bg-primary text-white text-sm font-medium rounded-xl hover:bg-blue-800">
+                    Lưu
+                </button>
+                <a href="{% url 'manager_departments' %}" class="flex-1 text-center py-2.5 border border-gray-300 text-sm font-medium rounded-xl text-gray-700 hover:bg-gray-50">
+                    Hủy
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Members -->
+{% if view_dept %}
+<div id="members-modal"
+     class="fixed inset-0 z-50 flex items-center justify-center p-4"
+     data-dept-id="{{ view_dept.pk }}"
+     data-leader-id="{{ view_dept.leader_id|default:'' }}"
+     data-add-url="{% url 'department_add_member' view_dept.pk %}"
+     data-remove-url="{% url 'department_remove_member' view_dept.pk %}">
+    <div class="absolute inset-0 bg-black/40" data-close-members-modal></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+
+        <!-- Header -->
+        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3 shrink-0">
+            <h3 class="text-lg font-semibold text-gray-900 truncate">Thành viên — {{ view_dept.name }}</h3>
+            <div class="flex items-center gap-2 shrink-0">
+                <button type="button" id="btn-toggle-add-member"
+                        class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors">
+                    <i class="fas fa-plus"></i> Thêm thành viên
+                </button>
+                <a href="{% url 'manager_departments' %}"
+                   class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                   aria-label="Đóng">
+                    <i class="fas fa-times"></i>
+                </a>
+            </div>
+        </div>
+
+        <!-- Inline add form (hidden by default) -->
+        <div id="add-member-panel"
+             class="hidden border-b border-gray-100 bg-slate-50/80 overflow-hidden transition-all duration-200">
+            <div class="px-5 py-4 space-y-3">
+                <label class="block text-xs font-medium text-gray-600">Chọn viên chức chưa thuộc tổ</label>
+                <div class="relative" id="candidate-combobox">
+                    <div class="relative">
+                        <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                        <input type="text" id="candidate-search" autocomplete="off"
+                               placeholder="Tìm theo tên hoặc username..."
+                               class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg bg-white
+                                      focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition">
+                        <input type="hidden" id="candidate-selected-id" value="">
+                    </div>
+                    <div id="candidate-dropdown"
+                         class="hidden absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                    </div>
+                </div>
+                <p id="add-member-error" class="hidden text-xs text-red-600"></p>
+                <div class="flex items-center gap-2">
+                    <button type="button" id="btn-confirm-add-member"
+                            class="bg-green-600 hover:bg-green-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors">
+                        Xác nhận thêm
+                    </button>
+                    <button type="button" id="btn-cancel-add-member"
+                            class="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-white transition-colors">
+                        Hủy
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Member list -->
+        <ul id="members-list" class="overflow-y-auto divide-y divide-gray-50 flex-1">
+            {% for m in view_dept.members.all %}
+            <li class="px-5 py-3 flex items-center gap-3 member-row transition-opacity duration-200"
+                data-user-id="{{ m.pk }}">
+                <img src="{{ m.avatar_url }}" class="h-9 w-9 rounded-full object-cover border border-gray-200 shrink-0" alt="">
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-medium text-gray-800 truncate">
+                        {{ m }}
+                        {% if view_dept.leader_id == m.pk %}
+                        <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">Trưởng tổ</span>
+                        {% endif %}
+                    </p>
+                    <p class="text-xs text-gray-400">{{ m.position|default:"—" }}</p>
+                </div>
+                {% if not m.is_active %}
+                <span class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600 shrink-0">Đã khóa</span>
+                {% endif %}
+                {% if view_dept.leader_id != m.pk %}
+                <button type="button"
+                        class="btn-remove-member w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-300 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
+                        title="Xóa khỏi tổ"
+                        data-user-id="{{ m.pk }}">
+                    <i class="fas fa-trash-alt text-sm"></i>
+                </button>
+                {% endif %}
+            </li>
+            {% empty %}
+            <li id="members-empty" class="px-6 py-10 text-center text-sm text-gray-400">Chưa có thành viên</li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
+
+{{ member_candidates|json_script:"member-candidates-data" }}
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var panel = document.getElementById('dept-panel');
+    var openBtn = document.getElementById('btn-open-create');
+    var closeBtn = document.getElementById('dept-panel-close');
+    var overlay = document.getElementById('dept-panel-overlay');
+    function openPanel() { if (panel) panel.classList.remove('hidden'); }
+    function closePanel() { window.location.href = '{% url "manager_departments" %}'; }
+    if (openBtn) openBtn.addEventListener('click', openPanel);
+    if (closeBtn) closeBtn.addEventListener('click', closePanel);
+    if (overlay) overlay.addEventListener('click', closePanel);
+
+    // ─── Members modal AJAX ───
+    var modal = document.getElementById('members-modal');
+    if (!modal) return;
+
+    var csrf = (document.querySelector('[name=csrfmiddlewaretoken]') || {}).value
+        || '{{ csrf_token }}';
+    var addUrl = modal.getAttribute('data-add-url');
+    var removeUrl = modal.getAttribute('data-remove-url');
+    var deptId = modal.getAttribute('data-dept-id');
+    var leaderId = modal.getAttribute('data-leader-id') || '';
+
+    var candidates = [];
+    try {
+        var el = document.getElementById('member-candidates-data');
+        if (el) candidates = JSON.parse(el.textContent);
+    } catch (e) { candidates = []; }
+
+    var addPanel = document.getElementById('add-member-panel');
+    var btnToggle = document.getElementById('btn-toggle-add-member');
+    var btnCancel = document.getElementById('btn-cancel-add-member');
+    var btnConfirm = document.getElementById('btn-confirm-add-member');
+    var searchInput = document.getElementById('candidate-search');
+    var selectedIdInput = document.getElementById('candidate-selected-id');
+    var dropdown = document.getElementById('candidate-dropdown');
+    var errorEl = document.getElementById('add-member-error');
+    var listEl = document.getElementById('members-list');
+
+    function showAddPanel(show) {
+        if (!addPanel) return;
+        addPanel.classList.toggle('hidden', !show);
+        if (show && searchInput) {
+            searchInput.value = '';
+            selectedIdInput.value = '';
+            renderDropdown('');
+            searchInput.focus();
+        } else {
+            hideDropdown();
+            clearError();
+        }
+    }
+
+    function clearError() {
+        if (!errorEl) return;
+        errorEl.textContent = '';
+        errorEl.classList.add('hidden');
+    }
+
+    function showError(msg) {
+        if (!errorEl) return;
+        errorEl.textContent = msg || '';
+        errorEl.classList.toggle('hidden', !msg);
+    }
+
+    function hideDropdown() {
+        if (dropdown) dropdown.classList.add('hidden');
+    }
+
+    function renderDropdown(query) {
+        if (!dropdown) return;
+        var q = (query || '').toLowerCase().trim();
+        var filtered = candidates.filter(function (c) {
+            if (!q) return true;
+            return (c.name + ' ' + c.username + ' ' + (c.position || '')).toLowerCase().indexOf(q) !== -1;
+        });
+        if (!filtered.length) {
+            dropdown.innerHTML = '<p class="px-3 py-4 text-center text-xs text-gray-400">Không còn viên chức phù hợp</p>';
+            dropdown.classList.remove('hidden');
+            return;
+        }
+        dropdown.innerHTML = filtered.map(function (c) {
+            return (
+                '<button type="button" class="candidate-option w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-blue-50 transition-colors" ' +
+                'data-id="' + c.id + '" data-name="' + escapeAttr(c.name) + '">' +
+                '<img src="' + escapeAttr(c.avatar) + '" class="w-8 h-8 rounded-full object-cover border border-gray-100" alt="">' +
+                '<span class="min-w-0 flex-1">' +
+                '<span class="block text-sm font-medium text-gray-800 truncate">' + escapeHtml(c.name) + '</span>' +
+                '<span class="block text-xs text-gray-400 truncate">@' + escapeHtml(c.username) +
+                (c.position ? ' · ' + escapeHtml(c.position) : '') + '</span>' +
+                '</span></button>'
+            );
+        }).join('');
+        dropdown.classList.remove('hidden');
+    }
+
+    function escapeHtml(s) {
+        return String(s || '').replace(/[&<>"']/g, function (ch) {
+            return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+        });
+    }
+    function escapeAttr(s) {
+        return escapeHtml(s).replace(/`/g, '&#96;');
+    }
+
+    if (btnToggle) btnToggle.addEventListener('click', function () {
+        showAddPanel(addPanel.classList.contains('hidden'));
+    });
+    if (btnCancel) btnCancel.addEventListener('click', function () { showAddPanel(false); });
+
+    document.querySelectorAll('[data-close-members-modal]').forEach(function (el) {
+        el.addEventListener('click', function () {
+            window.location.href = '{% url "manager_departments" %}';
+        });
+    });
+
+    if (searchInput) {
+        searchInput.addEventListener('focus', function () { renderDropdown(searchInput.value); });
+        searchInput.addEventListener('input', function () {
+            selectedIdInput.value = '';
+            renderDropdown(searchInput.value);
+        });
+    }
+
+    if (dropdown) {
+        dropdown.addEventListener('click', function (e) {
+            var opt = e.target.closest('.candidate-option');
+            if (!opt) return;
+            selectedIdInput.value = opt.getAttribute('data-id');
+            searchInput.value = opt.getAttribute('data-name') || '';
+            hideDropdown();
+            clearError();
+        });
+    }
+
+    document.addEventListener('click', function (e) {
+        var box = document.getElementById('candidate-combobox');
+        if (box && !box.contains(e.target)) hideDropdown();
+    });
+
+    function updateDeptCount(count) {
+        var badge = document.querySelector('[data-dept-count="' + deptId + '"]');
+        if (badge) badge.textContent = count;
+    }
+
+    function removeEmptyState() {
+        var empty = document.getElementById('members-empty');
+        if (empty) empty.remove();
+    }
+
+    function ensureEmptyState() {
+        if (!listEl) return;
+        if (listEl.querySelector('.member-row')) return;
+        if (document.getElementById('members-empty')) return;
+        var li = document.createElement('li');
+        li.id = 'members-empty';
+        li.className = 'px-6 py-10 text-center text-sm text-gray-400';
+        li.textContent = 'Chưa có thành viên';
+        listEl.appendChild(li);
+    }
+
+    function buildMemberRow(m) {
+        var li = document.createElement('li');
+        li.className = 'px-5 py-3 flex items-center gap-3 member-row transition-opacity duration-200 opacity-0';
+        li.setAttribute('data-user-id', m.id);
+
+        var leaderBadge = m.is_leader
+            ? ' <span class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">Trưởng tổ</span>'
+            : '';
+        var locked = m.is_active === false
+            ? '<span class="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-600 shrink-0">Đã khóa</span>'
+            : '';
+        var removeBtn = (!m.is_leader && String(m.id) !== String(leaderId))
+            ? ('<button type="button" class="btn-remove-member w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-300 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0" title="Xóa khỏi tổ" data-user-id="' + m.id + '">' +
+               '<i class="fas fa-trash-alt text-sm"></i></button>')
+            : '';
+
+        li.innerHTML =
+            '<img src="' + escapeAttr(m.avatar) + '" class="h-9 w-9 rounded-full object-cover border border-gray-200 shrink-0" alt="">' +
+            '<div class="flex-1 min-w-0">' +
+            '<p class="text-sm font-medium text-gray-800 truncate">' + escapeHtml(m.name) + leaderBadge + '</p>' +
+            '<p class="text-xs text-gray-400">' + escapeHtml(m.position || '—') + '</p>' +
+            '</div>' + locked + removeBtn;
+
+        requestAnimationFrame(function () {
+            li.classList.remove('opacity-0');
+            li.classList.add('opacity-100');
+        });
+        return li;
+    }
+
+    if (btnConfirm) {
+        btnConfirm.addEventListener('click', function () {
+            var userId = selectedIdInput && selectedIdInput.value;
+            if (!userId) {
+                showError('Vui lòng chọn một viên chức từ danh sách.');
+                return;
+            }
+            clearError();
+            btnConfirm.disabled = true;
+            var fd = new FormData();
+            fd.append('user_id', userId);
+            fd.append('csrfmiddlewaretoken', csrf);
+
+            fetch(addUrl, {
+                method: 'POST',
+                body: fd,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+            })
+                .then(function (res) { return res.json().then(function (data) { return { status: res.status, data: data }; }); })
+                .then(function (result) {
+                    btnConfirm.disabled = false;
+                    if (!result.data.ok) {
+                        showError(result.data.error || 'Không thể thêm thành viên.');
+                        return;
+                    }
+                    var m = result.data.member;
+                    removeEmptyState();
+                    listEl.appendChild(buildMemberRow(m));
+                    candidates = candidates.filter(function (c) { return String(c.id) !== String(m.id); });
+                    updateDeptCount(result.data.member_count);
+                    showAddPanel(false);
+                })
+                .catch(function () {
+                    btnConfirm.disabled = false;
+                    showError('Lỗi kết nối. Vui lòng thử lại.');
+                });
+        });
+    }
+
+    if (listEl) {
+        listEl.addEventListener('click', function (e) {
+            var btn = e.target.closest('.btn-remove-member');
+            if (!btn) return;
+            var userId = btn.getAttribute('data-user-id');
+            if (!userId) return;
+            if (!confirm('Gỡ thành viên này khỏi tổ?')) return;
+
+            var row = listEl.querySelector('.member-row[data-user-id="' + userId + '"]');
+            var fd = new FormData();
+            fd.append('user_id', userId);
+            fd.append('csrfmiddlewaretoken', csrf);
+
+            fetch(removeUrl, {
+                method: 'POST',
+                body: fd,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                credentials: 'same-origin',
+            })
+                .then(function (res) { return res.json().then(function (data) { return { status: res.status, data: data }; }); })
+                .then(function (result) {
+                    if (!result.data.ok) {
+                        alert(result.data.error || 'Không thể gỡ thành viên.');
+                        return;
+                    }
+                    if (row) {
+                        row.classList.add('opacity-0');
+                        setTimeout(function () {
+                            row.remove();
+                            ensureEmptyState();
+                        }, 200);
+                    }
+                    if (result.data.member) {
+                        candidates.push(result.data.member);
+                        candidates.sort(function (a, b) {
+                            return String(a.name).localeCompare(String(b.name), 'vi');
+                        });
+                    }
+                    updateDeptCount(result.data.member_count);
+                })
+                .catch(function () {
+                    alert('Lỗi kết nối. Vui lòng thử lại.');
+                });
+        });
+    }
+})();
+</script>
+{% endblock %}
