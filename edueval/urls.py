@@ -12,5 +12,6 @@ urlpatterns = [
     path('', include('tasks.urls')),
 ]
 
-if settings.DEBUG:
+# Local media only when not using S3 (FileFields then serve via signed S3 URLs).
+if settings.DEBUG and not getattr(settings, 'USE_S3', False):
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

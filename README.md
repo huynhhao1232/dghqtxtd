@@ -28,6 +28,34 @@ python manage.py collectstatic --noinput
 
 Demo: `lanhdao` / `Demo@123`
 
+## Media trên Long Van S3 (Django)
+
+Upload (avatar, minh chứng, đính kèm task) dùng **django-storages + boto3** khi `USE_S3=1`. Static files vẫn trên server PA.
+
+1. Tạo bucket trên console Long Van **hoặc** dùng bucket đã có (đặt đúng `AWS_STORAGE_BUCKET_NAME`). Một số gói giới hạn số bucket.
+
+```bash
+cp .env.example .env   # điền AccessKey / SecretKey / tên bucket
+pip install -r requirements.txt
+python manage.py check_s3                  # liệt kê bucket (giống aws s3 ls)
+python manage.py check_s3 --create-bucket  # tạo nếu gói còn slot
+```
+
+2. Biến môi trường cần set (local `.env` hoặc PA Web → Environment / WSGI):
+
+| Biến | Ví dụ |
+|------|--------|
+| `USE_S3` | `1` |
+| `AWS_ACCESS_KEY_ID` | *(từ Long Van)* |
+| `AWS_SECRET_ACCESS_KEY` | *(từ Long Van — không commit)* |
+| `AWS_STORAGE_BUCKET_NAME` | `edueval` |
+| `AWS_S3_ENDPOINT_URL` | `https://s3-hcm5-r1.longvan.net` |
+| `AWS_S3_REGION_NAME` | `us-east-1` |
+| `AWS_S3_SIGNATURE_VERSION` | `s3v4` |
+| `AWS_S3_ADDRESSING_STYLE` | `path` |
+
+Kiểm tra kết nối: `python manage.py check_s3` (tương đương `aws s3 ls` + kiểm tra bucket).
+
 ## Chạy Laravel
 
 Xem [`edueval-laravel/DEPLOY.md`](edueval-laravel/DEPLOY.md).

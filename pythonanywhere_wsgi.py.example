@@ -17,6 +17,15 @@ os.environ['DJANGO_CSRF_TRUSTED_ORIGINS'] = 'https://yourusername.pythonanywhere
 # Tạo key mới: python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
 os.environ['DJANGO_SECRET_KEY'] = ' thay-bang-secret-key-moi '
 
+# Optional: Long Van S3 for media uploads (or set these in Web → Environment variables)
+# os.environ['USE_S3'] = '1'
+# os.environ['AWS_ACCESS_KEY_ID'] = '...'
+# os.environ['AWS_SECRET_ACCESS_KEY'] = '...'
+# os.environ['AWS_STORAGE_BUCKET_NAME'] = 'edueval'
+# os.environ['AWS_S3_ENDPOINT_URL'] = 'https://s3-hcm5-r1.longvan.net'
+# os.environ['AWS_S3_REGION_NAME'] = 'us-east-1'
+# os.environ['AWS_S3_ADDRESSING_STYLE'] = 'path'
+
 from django.core.wsgi import get_wsgi_application
 
 application = get_wsgi_application()

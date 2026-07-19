@@ -7,6 +7,31 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _load_dotenv(path: Path) -> None:
+    """Load KEY=VALUE pairs from .env if present (does not override existing env)."""
+    if not path.is_file():
+        return
+    try:
+        text = path.read_text(encoding='utf-8')
+    except OSError:
+        return
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, _, value = line.partition('=')
+        key = key.strip()
+        if not key or key in os.environ:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        os.environ[key] = value
+
+
+_load_dotenv(BASE_DIR / '.env')
+
 # Production: set DJANGO_SECRET_KEY on PythonAnywhere (Web → Environment variables
 # or in the WSGI file). Local fallback keeps development convenient.
 SECRET_KEY = os.environ.get(
@@ -105,6 +130,43 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# ---------------------------------------------------------------------------
+# Media storage: local disk by default; Long Van S3 when USE_S3=1.
+# Static files stay on the server (PythonAnywhere static mapping / collectstatic).
+# ---------------------------------------------------------------------------
+USE_S3 = os.environ.get('USE_S3', '0').lower() in ('1', 'true', 'yes', 'on')
+
+AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID', '')
+AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY', '')
+AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME', 'edueval')
+AWS_S3_ENDPOINT_URL = os.environ.get(
+    'AWS_S3_ENDPOINT_URL',
+    'https://s3-hcm5-r1.longvan.net',
+)
+AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME', 'us-east-1') or None
+AWS_S3_SIGNATURE_VERSION = os.environ.get('AWS_S3_SIGNATURE_VERSION', 's3v4')
+AWS_S3_ADDRESSING_STYLE = os.environ.get('AWS_S3_ADDRESSING_STYLE', 'path')
+AWS_DEFAULT_ACL = None  # private objects; FileField.url uses signed URLs
+AWS_QUERYSTRING_AUTH = True
+AWS_S3_FILE_OVERWRITE = False
+AWS_S3_OBJECT_PARAMETERS = {
+    'CacheControl': 'max-age=86400',
+}
+
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+    },
+}
+
+if USE_S3:
+    STORAGES['default'] = {
+        'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage',
+    }
 
 # Cho phép nhúng media cùng origin (xem trước PDF trong Modal iframe)
 X_FRAME_OPTIONS = 'SAMEORIGIN'
