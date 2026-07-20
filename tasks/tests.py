@@ -353,7 +353,7 @@ class SubtaskWBSTestCase(TestCase):
             Task.objects.filter(title=base_title).exists()
         )
 
-        # Trang đã giao: 1 node cây, không phải 3 hàng phẳng
+        # Trang đã giao: 1 hàng phẳng + Chi tiết mở phân cấp
         list_resp = self.client.get(reverse('manager_manage_tasks'))
         self.assertEqual(list_resp.status_code, 200)
         nodes = list_resp.context['tree_nodes']
@@ -362,7 +362,19 @@ class SubtaskWBSTestCase(TestCase):
         self.assertEqual(batch_nodes[0]['total'], 3)
         self.assertEqual(batch_nodes[0]['done'], 0)
         self.assertContains(list_resp, '0/3 xong')
+        self.assertContains(list_resp, 'Chi tiết')
+        self.assertNotContains(list_resp, 'tree-toggle')
         self.assertContains(list_resp, self.dept.name)
+
+        detail = self.client.get(
+            reverse('manager_task_detail', kwargs={'pk': batch_nodes[0]['task'].pk})
+        )
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, base_title)
+        self.assertContains(detail, 'Tiến độ theo Tổ/Nhóm')
+        self.assertContains(detail, self.dept.name)
+        self.assertIsNotNone(detail.context['hierarchy'])
+        self.assertEqual(detail.context['hierarchy']['total'], 3)
 
     def test_department_leader_coordinate_keeps_existing_flow(self):
         """Chủ trì — Phối hợp → luôn giao Trưởng tổ Chủ trì như cũ."""
@@ -1172,7 +1184,7 @@ class RoleBasedAccessControlTestCase(TestCase):
         self.assertContains(resp, 'Tổ đã giao')
         self.assertNotContains(resp, 'BGH đã giao')
         self.assertContains(resp, 'Công việc đã giao')
-        self.assertContains(resp, 'Chỉ các việc bạn đã phân công')
+        self.assertContains(resp, 'Danh sách việc bạn đã phân công')
         # Chỉ việc mình tạo; việc BGH giao tới không vào danh sách (có thể hiện ở thông báo).
         listed_titles = {n['title'] for n in resp.context['tree_nodes']}
         self.assertEqual(listed_titles, {'Tổ đã giao'})

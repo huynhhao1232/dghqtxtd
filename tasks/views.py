@@ -1469,6 +1469,9 @@ def _person_leaf_from_assignment(assignment, task, today):
     is_overdue = (
         task.deadline < today and status != TaskAssignment.STATUS_COMPLETED
     )
+    grade = None
+    if assignment.evaluation_result:
+        grade = assignment.evaluation_result_label
     return {
         'name': assignment.target_display_name,
         'avatar_url': assignment.target_avatar_url,
@@ -1479,7 +1482,16 @@ def _person_leaf_from_assignment(assignment, task, today):
         'is_overdue': is_overdue,
         'task': task,
         'assignment': assignment,
-        'detail_url': reverse('manager_task_detail', kwargs={'pk': task.pk}),
+        'grade': grade,
+        'detail_url': reverse('staff_task_detail', kwargs={'pk': assignment.pk}),
+        'review_url': (
+            reverse('manager_assignment_review', kwargs={
+                'pk': task.pk,
+                'assignment_pk': assignment.pk,
+            })
+            if status == TaskAssignment.STATUS_PENDING
+            else None
+        ),
     }
 
 
@@ -1487,13 +1499,16 @@ def _person_leaf_from_participation(part, task, today):
     """Thành viên tham gia (chưa có assignment cá nhân) — trạng thái theo đánh giá nội bộ."""
     if part.evaluation == TaskParticipation.EVAL_DAT:
         status = TaskAssignment.STATUS_COMPLETED
-    elif part.evaluation in (
-        TaskParticipation.EVAL_CHO_LAM_LAI,
-        TaskParticipation.EVAL_TRE_BI_TRU_DIEM,
-    ):
+        grade = 'Đạt'
+    elif part.evaluation == TaskParticipation.EVAL_TRE_BI_TRU_DIEM:
         status = TaskAssignment.STATUS_REDO
+        grade = 'Làm lại & trừ 1'
+    elif part.evaluation == TaskParticipation.EVAL_CHO_LAM_LAI:
+        status = TaskAssignment.STATUS_REDO
+        grade = 'Yêu cầu làm lại'
     else:
         status = TaskAssignment.STATUS_IN_PROGRESS
+        grade = None
     is_overdue = (
         task.deadline < today and status != TaskAssignment.STATUS_COMPLETED
     )
@@ -1508,7 +1523,9 @@ def _person_leaf_from_participation(part, task, today):
         'is_overdue': is_overdue,
         'task': task,
         'assignment': None,
+        'grade': grade,
         'detail_url': reverse('manager_task_detail', kwargs={'pk': task.pk}),
+        'review_url': None,
     }
 
 
@@ -1593,21 +1610,22 @@ def _build_batch_tree_node(member_tasks, today):
             )
         )
 
-    # Anchor task = mới nhất (để gia hạn/xóa không áp dụng hàng loạt trên L1)
-    anchor = max(enriched, key=lambda t: t.created_at)
+    # Anchor = task đầu tiên (ổn định) — dùng cho link Chi tiết
+    anchor = min(enriched, key=lambda t: t.pk)
     batch_key = str(anchor.batch_key) if anchor.batch_key else f'batch-{anchor.pk}'
     node = _tree_node_meta(
         title,
         departments,
         today,
         deadline=min(t.deadline for t in enriched),
-        task=None,
+        task=anchor,
         node_id=f'batch-{batch_key}',
         kind='batch',
     )
     node['member_tasks'] = enriched
     node['cycle_display'] = anchor.get_cycle_display()
     node['description'] = anchor.description or ''
+    node['is_batch_group'] = True
     return node
 
 
@@ -2200,7 +2218,12 @@ def manager_review_task(request, pk):
 def manager_task_detail(request, pk):
     allowed = _get_managed_task_or_403(request.user, pk)
     task = get_object_or_404(
-        Task.objects.select_related('created_by', 'primary_department', 'primary_department__leader')
+        Task.objects.select_related(
+            'created_by',
+            'primary_department',
+            'primary_department__leader',
+            'source_department',
+        )
         .prefetch_related(
             'coordinating_departments',
             'attachments',
@@ -2218,20 +2241,82 @@ def manager_task_detail(request, pk):
                     'assignee_department__leader',
                 ).order_by('pk'),
             ),
+            Prefetch(
+                'subtasks',
+                queryset=Task.objects.select_related('scope_department').prefetch_related(
+                    Prefetch(
+                        'assignments',
+                        queryset=TaskAssignment.objects.select_related('assignee'),
+                    )
+                ),
+                to_attr='prefetched_subtasks',
+            ),
         ),
         pk=allowed.pk,
         parent_task__isnull=True,
     )
+    today = timezone.localdate()
+    hierarchy = None
+    display_title = task.title
+
+    if task.batch_key:
+        siblings = list(
+            _manager_tasks_queryset(request.user).filter(batch_key=task.batch_key)
+        )
+        if not siblings:
+            siblings = [task]
+        hierarchy = _build_batch_tree_node(siblings, today)
+        if hierarchy:
+            display_title = hierarchy['title']
+    elif task.is_team_task:
+        hierarchy = _build_team_tree_node(task, today)
+    elif _task_has_department_assignments(task):
+        hierarchy = _build_batch_department_tree_node(task, today)
+    else:
+        assignees = [a for a in task.assignments.all() if a.assignee_id]
+        if len(assignees) > 1:
+            people = [
+                _person_leaf_from_assignment(a, task, today) for a in assignees
+            ]
+            dept_node = _dept_node(
+                type('D', (), {
+                    'pk': 0,
+                    'name': 'Người nhận',
+                    'badge_classes': 'bg-slate-100 text-slate-700 ring-slate-500/20',
+                })(),
+                people,
+            )
+            hierarchy = _tree_node_meta(
+                task.title,
+                [dept_node],
+                today,
+                deadline=task.deadline,
+                task=task,
+                node_id=f'task-{task.pk}',
+                kind='multi',
+            )
+
     all_assignments = list(task.assignments.all())
     canonical = task.get_canonical_assignment() if task.is_team_task else None
-    assignments = [canonical] if canonical else all_assignments
+    # Hierarchy cards: nghiệm thu từng người. Team task vẫn giữ bảng canonical.
+    if hierarchy and not task.is_team_task:
+        assignments = []
+    elif task.is_team_task:
+        assignments = [canonical] if canonical else all_assignments
+    else:
+        assignments = all_assignments
     submitted = sum(
         1
-        for a in assignments
+        for a in (assignments or all_assignments)
         if a.status in (TaskAssignment.STATUS_PENDING, TaskAssignment.STATUS_COMPLETED)
     )
-    total = len(assignments)
-    progress_pct = int(round((submitted / total) * 100)) if total else 0
+    total = len(assignments) if assignments else len(all_assignments)
+    if hierarchy and hierarchy.get('total'):
+        progress_pct = hierarchy['pct']
+        submitted = hierarchy['done']
+        total = hierarchy['total']
+    else:
+        progress_pct = int(round((submitted / total) * 100)) if total else 0
     review_form = ReviewForm()
 
     return render(
@@ -2239,6 +2324,8 @@ def manager_task_detail(request, pk):
         'manager/task_detail.html',
         {
             'task': task,
+            'display_title': display_title,
+            'hierarchy': hierarchy,
             'assignments': assignments,
             'participations': list(task.participations.all()),
             'submitted_count': submitted,

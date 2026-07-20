@@ -7,7 +7,7 @@
     <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
             <h1 class="text-2xl font-bold text-gray-900">Công việc đã giao</h1>
-            <p class="text-sm text-gray-500 mt-1">Chỉ các việc bạn đã phân công — xem dạng cây Tổ/Nhóm → cá nhân</p>
+            <p class="text-sm text-gray-500 mt-1">Danh sách việc bạn đã phân công — bấm Chi tiết để xem Tổ/Nhóm và cá nhân</p>
         </div>
         {% if request.user.is_director or request.user.is_department %}
         <a href="{% url 'manager_create_task' %}"
@@ -102,7 +102,7 @@
         </div>
     </form>
 
-    {# ── Data table ── #}
+    {# ── Flat list (một hàng / công việc gốc) ── #}
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div class="overflow-x-auto">
             <table class="min-w-full text-sm">
@@ -116,7 +116,7 @@
                         <th class="text-right px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Hành động</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-gray-100" id="task-tree-body">
+                <tbody class="divide-y divide-gray-100">
                     {% for node in tree_nodes %}
                     {% if node.is_flat %}
                     {% with task=node.task %}
@@ -182,9 +182,9 @@
                         <td class="px-5 py-4 align-top">
                             <div class="flex items-center justify-end gap-1.5">
                                 <a href="{% url 'manager_task_detail' task.pk %}"
-                                   class="p-2 rounded-lg text-teal-600 hover:bg-teal-50 transition"
-                                   title="Chi tiết & nghiệm thu">
-                                    <i class="fas fa-chart-bar"></i>
+                                   class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 transition"
+                                   title="Chi tiết">
+                                    <i class="fas fa-eye"></i> Chi tiết
                                 </a>
                                 <button type="button"
                                         class="btn-edit p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition"
@@ -205,16 +205,12 @@
                                         <form method="post" action="{% url 'manager_task_extend' task.pk %}">
                                             {% csrf_token %}
                                             <input type="hidden" name="days" value="3">
-                                            <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-amber-50">
-                                                + 3 ngày
-                                            </button>
+                                            <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-amber-50">+ 3 ngày</button>
                                         </form>
                                         <form method="post" action="{% url 'manager_task_extend' task.pk %}">
                                             {% csrf_token %}
                                             <input type="hidden" name="days" value="5">
-                                            <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-amber-50">
-                                                + 5 ngày
-                                            </button>
+                                            <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-amber-50">+ 5 ngày</button>
                                         </form>
                                     </div>
                                 </div>
@@ -230,45 +226,35 @@
                     </tr>
                     {% endwith %}
                     {% else %}
-                    {# ── Level 1: công việc gốc / nhóm batch ── #}
-                    <tr class="bg-slate-50/60 hover:bg-slate-100/80 transition tree-l1"
-                        data-tree-root="{{ node.node_id }}">
+                    {# Nhóm batch / tổ — một hàng phẳng, badge tóm tắt #}
+                    <tr class="hover:bg-slate-50/80 transition">
                         <td class="px-5 py-4 align-top">
-                            <div class="flex items-start gap-2">
-                                <button type="button"
-                                        class="tree-toggle mt-0.5 w-7 h-7 shrink-0 rounded-md text-slate-500 hover:bg-white hover:text-primary transition"
-                                        data-toggle-root="{{ node.node_id }}"
-                                        aria-expanded="false"
-                                        title="Mở/đóng cây">
-                                    <i class="fas fa-chevron-right text-xs transition-transform duration-150"></i>
-                                </button>
-                                <div class="min-w-0">
-                                    {% if node.task %}
-                                    <a href="{% url 'manager_task_detail' node.task.pk %}"
-                                       class="font-bold text-gray-900 hover:text-primary transition">
-                                        {{ node.title }}
-                                    </a>
-                                    {% else %}
-                                    <span class="font-bold text-gray-900">{{ node.title }}</span>
-                                    {% endif %}
-                                    <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-600/15">
-                                            <i class="fas fa-check-double text-[9px]"></i>
-                                            {{ node.done }}/{{ node.total }} xong
-                                        </span>
-                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-white text-slate-600 ring-1 ring-inset ring-slate-200">
-                                            <i class="fas fa-sitemap text-[9px]"></i>
-                                            {{ node.departments|length }} tổ
-                                        </span>
-                                    </div>
-                                    {% if node.description %}
-                                    <p class="text-xs text-gray-400 mt-1 line-clamp-1 max-w-xs">{{ node.description }}</p>
-                                    {% endif %}
-                                    {% if node.cycle_display %}
-                                    <p class="text-[11px] text-gray-400 mt-1">{{ node.cycle_display }}</p>
-                                    {% endif %}
-                                </div>
+                            {% if node.task %}
+                            <a href="{% url 'manager_task_detail' node.task.pk %}"
+                               class="font-semibold text-gray-900 hover:text-primary transition">
+                                {{ node.title }}
+                            </a>
+                            {% else %}
+                            <span class="font-semibold text-gray-900">{{ node.title }}</span>
+                            {% endif %}
+                            <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                {% if node.total %}
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-600/15">
+                                    {{ node.done }}/{{ node.total }} xong
+                                </span>
+                                {% endif %}
+                                {% if node.departments %}
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-50 text-slate-600 ring-1 ring-inset ring-slate-200">
+                                    {{ node.departments|length }} tổ
+                                </span>
+                                {% endif %}
                             </div>
+                            {% if node.description %}
+                            <p class="text-xs text-gray-400 mt-1 line-clamp-1 max-w-xs">{{ node.description }}</p>
+                            {% endif %}
+                            {% if node.cycle_display %}
+                            <p class="text-[11px] text-gray-400 mt-1">{{ node.cycle_display }}</p>
+                            {% endif %}
                         </td>
                         <td class="px-5 py-4 align-top">
                             <div class="flex flex-wrap gap-1.5 max-w-[16rem]">
@@ -307,13 +293,14 @@
                             </span>
                         </td>
                         <td class="px-5 py-4 align-top">
-                            {% if node.task %}
                             <div class="flex items-center justify-end gap-1.5">
+                                {% if node.task %}
                                 <a href="{% url 'manager_task_detail' node.task.pk %}"
-                                   class="p-2 rounded-lg text-teal-600 hover:bg-teal-50 transition"
-                                   title="Chi tiết & nghiệm thu">
-                                    <i class="fas fa-chart-bar"></i>
+                                   class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 transition"
+                                   title="Chi tiết">
+                                    <i class="fas fa-eye"></i> Chi tiết
                                 </a>
+                                {% if not node.is_batch_group %}
                                 <button type="button"
                                         class="btn-edit p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition"
                                         title="Sửa"
@@ -349,112 +336,11 @@
                                         data-title="{{ node.task.title|escape }}">
                                     <i class="fas fa-trash-alt"></i>
                                 </button>
-                            </div>
-                            {% else %}
-                            <p class="text-[11px] text-gray-400 text-right pr-2">Mở cây để xem từng người</p>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% for dept in node.departments %}
-                    {# ── Level 2: tiến độ Tổ/Nhóm ── #}
-                    <tr class="hidden tree-l2 bg-white hover:bg-blue-50/40 transition"
-                        data-tree-root="{{ node.node_id }}"
-                        data-tree-dept="{{ node.node_id }}-{{ dept.id }}">
-                        <td class="pl-12 pr-5 py-3 align-top" colspan="1">
-                            <div class="flex items-center gap-2">
-                                <button type="button"
-                                        class="tree-toggle-dept w-6 h-6 shrink-0 rounded text-slate-400 hover:bg-slate-100 hover:text-primary transition"
-                                        data-toggle-dept="{{ node.node_id }}-{{ dept.id }}"
-                                        aria-expanded="false"
-                                        title="Mở thành viên">
-                                    <i class="fas fa-chevron-right text-[10px] transition-transform duration-150"></i>
-                                </button>
-                                <span class="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-800">
-                                    <i class="fas fa-users text-slate-400 text-xs"></i>
-                                    {{ dept.name }}
-                                </span>
-                                <span class="text-[11px] text-gray-400">{{ dept.done }}/{{ dept.total }}</span>
-                            </div>
-                        </td>
-                        <td class="px-5 py-3 align-middle">
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ring-1 ring-inset {{ dept.badge_classes }}">
-                                {{ dept.name }}
-                            </span>
-                        </td>
-                        <td class="px-5 py-3 align-middle text-gray-400 text-xs">—</td>
-                        <td class="px-5 py-3 align-middle">
-                            <div class="flex items-center gap-2">
-                                <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden max-w-[8rem]">
-                                    <div class="h-full rounded-full {% if dept.pct >= 100 %}bg-emerald-500{% elif dept.pct >= 40 %}bg-blue-500{% else %}bg-gray-400{% endif %}"
-                                         style="width: {{ dept.pct }}%"></div>
-                                </div>
-                                <span class="text-[11px] font-semibold text-gray-600">{{ dept.pct }}%</span>
-                            </div>
-                        </td>
-                        <td class="px-5 py-3 align-middle">
-                            <span class="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium {{ dept.display_status_pill }}">
-                                {{ dept.display_status_label }}
-                            </span>
-                        </td>
-                        <td class="px-5 py-3"></td>
-                    </tr>
-                    {% for person in dept.people %}
-                    {# ── Level 3: chi tiết cá nhân ── #}
-                    <tr class="hidden tree-l3 hover:bg-emerald-50/30 transition"
-                        data-tree-root="{{ node.node_id }}"
-                        data-tree-dept="{{ node.node_id }}-{{ dept.id }}">
-                        <td class="pl-20 pr-5 py-3 align-top">
-                            <div class="flex items-center gap-2.5">
-                                <img src="{{ person.avatar_url }}" alt=""
-                                     class="w-8 h-8 rounded-full object-cover ring-1 ring-slate-200 shrink-0">
-                                <div class="min-w-0">
-                                    <a href="{{ person.detail_url }}"
-                                       class="text-sm font-medium text-gray-900 hover:text-primary transition truncate block">
-                                        {{ person.name }}
-                                    </a>
-                                    {% if person.task and person.task.title != node.title %}
-                                    <p class="text-[11px] text-gray-400 truncate max-w-[14rem]">{{ person.task.title }}</p>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </td>
-                        <td class="px-5 py-3 align-middle text-xs text-gray-500">{{ dept.name }}</td>
-                        <td class="px-5 py-3 align-middle whitespace-nowrap">
-                            {% if person.is_overdue %}
-                            <span class="text-red-600 text-xs font-medium">{{ person.deadline|date:"d/m/Y" }}</span>
-                            {% else %}
-                            <span class="text-gray-600 text-xs">{{ person.deadline|date:"d/m/Y" }}</span>
-                            {% endif %}
-                        </td>
-                        <td class="px-5 py-3 align-middle text-xs text-gray-400">—</td>
-                        <td class="px-5 py-3 align-middle">
-                            <span class="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium {{ person.status_pill }}">
-                                {{ person.status_label }}
-                            </span>
-                        </td>
-                        <td class="px-5 py-3 align-middle">
-                            <div class="flex items-center justify-end gap-1">
-                                <a href="{{ person.detail_url }}"
-                                   class="p-1.5 rounded-lg text-teal-600 hover:bg-teal-50 transition"
-                                   title="Chi tiết">
-                                    <i class="fas fa-external-link-alt text-xs"></i>
-                                </a>
-                                {% if person.task %}
-                                <button type="button"
-                                        class="btn-edit p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 transition"
-                                        title="Sửa"
-                                        data-id="{{ person.task.pk }}"
-                                        data-title="{{ person.task.title|escape }}"
-                                        data-description="{{ person.task.description|escape }}"
-                                        data-deadline="{{ person.task.deadline|date:'Y-m-d' }}">
-                                    <i class="fas fa-pen text-xs"></i>
-                                </button>
+                                {% endif %}
                                 {% endif %}
                             </div>
                         </td>
                     </tr>
-                    {% endfor %}
-                    {% endfor %}
                     {% endif %}
                     {% empty %}
                     <tr>
@@ -472,7 +358,7 @@
         <div class="px-5 py-3.5 border-t border-gray-100 flex items-center justify-between gap-3">
             <p class="text-xs text-gray-500">
                 Trang {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}
-                · {{ page_obj.paginator.count }} nhóm / công việc
+                · {{ page_obj.paginator.count }} công việc
             </p>
             <div class="flex gap-2">
                 {% if page_obj.has_previous %}
@@ -564,53 +450,6 @@
 {% block extra_js %}
 <script>
 (function () {
-    // Tree expand / collapse
-    function setChevron(btn, open) {
-        if (!btn) return;
-        var icon = btn.querySelector('i');
-        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-        if (icon) {
-            icon.classList.toggle('rotate-90', open);
-        }
-    }
-
-    document.querySelectorAll('.tree-toggle').forEach(function (btn) {
-        btn.addEventListener('click', function (e) {
-            e.stopPropagation();
-            var rootId = btn.getAttribute('data-toggle-root');
-            var open = btn.getAttribute('aria-expanded') !== 'true';
-            setChevron(btn, open);
-            document.querySelectorAll('.tree-l2[data-tree-root="' + rootId + '"]').forEach(function (row) {
-                row.classList.toggle('hidden', !open);
-                if (!open) {
-                    var deptId = row.getAttribute('data-tree-dept');
-                    document.querySelectorAll('.tree-l3[data-tree-dept="' + deptId + '"]').forEach(function (l3) {
-                        l3.classList.add('hidden');
-                    });
-                    var deptBtn = row.querySelector('.tree-toggle-dept');
-                    setChevron(deptBtn, false);
-                }
-            });
-            if (!open) {
-                document.querySelectorAll('.tree-l3[data-tree-root="' + rootId + '"]').forEach(function (row) {
-                    row.classList.add('hidden');
-                });
-            }
-        });
-    });
-
-    document.querySelectorAll('.tree-toggle-dept').forEach(function (btn) {
-        btn.addEventListener('click', function (e) {
-            e.stopPropagation();
-            var deptId = btn.getAttribute('data-toggle-dept');
-            var open = btn.getAttribute('aria-expanded') !== 'true';
-            setChevron(btn, open);
-            document.querySelectorAll('.tree-l3[data-tree-dept="' + deptId + '"]').forEach(function (row) {
-                row.classList.toggle('hidden', !open);
-            });
-        });
-    });
-
     var editModal = document.getElementById('edit-modal');
     var editForm = document.getElementById('edit-form');
     var editUrlTpl = "{% url 'manager_task_edit' 0 %}".replace('/0/', '/__ID__/');
@@ -647,7 +486,6 @@
         if (el) el.addEventListener('click', closeEdit);
     });
 
-    // Extend menus
     document.querySelectorAll('[data-extend-wrap]').forEach(function (wrap) {
         var toggle = wrap.querySelector('.btn-extend-toggle');
         var menu = wrap.querySelector('.extend-menu');
@@ -666,7 +504,6 @@
         });
     });
 
-    // Delete modal
     var deleteModal = document.getElementById('delete-modal');
     var deleteForm = document.getElementById('delete-form');
     var deleteUrlTpl = "{% url 'manager_task_delete' 0 %}".replace('/0/', '/__ID__/');

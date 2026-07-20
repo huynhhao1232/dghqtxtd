@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ task.title }} — Chi tiết — EduEval{% endblock %}
+{% block title %}{{ display_title|default:task.title }} — Chi tiết — EduEval{% endblock %}
 
 {% block content %}
 <div class="space-y-6">
@@ -10,7 +10,7 @@
                class="inline-flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-primary transition-colors">
                 <i class="fas fa-arrow-left"></i> Công việc đã giao
             </a>
-            <h1 class="text-2xl font-bold text-gray-900 mt-2">{{ task.title }}</h1>
+            <h1 class="text-2xl font-bold text-gray-900 mt-2">{{ display_title|default:task.title }}</h1>
             <p class="text-sm text-gray-500 mt-1">
                 {{ task.get_cycle_display }} · Hạn {{ task.deadline|date:"d/m/Y" }}
                 · Giao bởi {{ task.created_by }}
@@ -26,26 +26,39 @@
                 <i class="fas fa-handshake"></i> {{ d.name }}
             </span>
             {% endfor %}
+            {% elif hierarchy and hierarchy.departments %}
+            {% for d in hierarchy.departments %}
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium ring-1 ring-inset {{ d.badge_classes }}">
+                <i class="fas fa-users"></i> {{ d.name }}
+            </span>
+            {% endfor %}
             {% endif %}
         </div>
     </div>
 
-    {% if task.description %}
+    {% if task.description and not task.batch_key %}
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
         <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">Mô tả</h2>
         <p class="text-sm text-gray-700 whitespace-pre-line">{{ task.description }}</p>
+    </div>
+    {% elif hierarchy and hierarchy.description %}
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+        <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">Mô tả</h2>
+        <p class="text-sm text-gray-700 whitespace-pre-line">{{ hierarchy.description }}</p>
     </div>
     {% endif %}
 
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-            <p class="text-xs font-semibold text-gray-400 uppercase">Tiến độ nộp bài</p>
+            <p class="text-xs font-semibold text-gray-400 uppercase">Tiến độ tổng</p>
             <p class="text-3xl font-bold text-primary mt-1">{{ submitted_count }}/{{ total_count }}</p>
             <div class="mt-3 h-2 bg-gray-100 rounded-full overflow-hidden">
                 <div class="h-full rounded-full {% if progress_pct >= 100 %}bg-emerald-500{% elif progress_pct >= 50 %}bg-amber-400{% else %}bg-blue-500{% endif %}"
                      style="width: {{ progress_pct }}%"></div>
             </div>
-            <p class="text-xs text-gray-400 mt-2">{{ progress_pct }}% đã nộp (chờ duyệt hoặc hoàn thành)</p>
+            <p class="text-xs text-gray-400 mt-2">
+                {% if hierarchy %}{{ hierarchy.progress_label }}{% else %}{{ progress_pct }}% đã nộp{% endif %}
+            </p>
         </div>
         <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-5 sm:col-span-2">
             <p class="text-xs font-semibold text-gray-400 uppercase mb-3">File đính kèm gốc</p>
@@ -64,6 +77,83 @@
         </div>
     </div>
 
+    {% if hierarchy and hierarchy.departments %}
+    <div class="space-y-4">
+        <div class="flex items-center justify-between gap-3">
+            <h2 class="text-base font-semibold text-gray-800">
+                <i class="fas fa-layer-group text-primary mr-2"></i>
+                Tiến độ theo Tổ/Nhóm
+            </h2>
+            <span class="text-xs text-gray-400">{{ hierarchy.departments|length }} tổ · {{ hierarchy.total }} người</span>
+        </div>
+
+        {% for dept in hierarchy.departments %}
+        <section class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <header class="px-5 py-4 border-b border-gray-100 bg-slate-50/80 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3 min-w-0">
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-semibold ring-1 ring-inset {{ dept.badge_classes }}">
+                        <i class="fas fa-users text-xs"></i> {{ dept.name }}
+                    </span>
+                    <span class="text-sm text-gray-500">{{ dept.done }}/{{ dept.total }} xong</span>
+                </div>
+                <div class="flex items-center gap-3 min-w-[10rem]">
+                    <div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                        <div class="h-full rounded-full {% if dept.pct >= 100 %}bg-emerald-500{% elif dept.pct >= 40 %}bg-blue-500{% else %}bg-gray-400{% endif %}"
+                             style="width: {{ dept.pct }}%"></div>
+                    </div>
+                    <span class="text-xs font-semibold text-gray-600 w-10 text-right">{{ dept.pct }}%</span>
+                    <span class="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium {{ dept.display_status_pill }}">
+                        {{ dept.display_status_label }}
+                    </span>
+                </div>
+            </header>
+            <ul class="divide-y divide-gray-100">
+                {% for person in dept.people %}
+                <li class="px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-50/60">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <img src="{{ person.avatar_url }}" alt=""
+                             class="w-10 h-10 rounded-full object-cover ring-1 ring-gray-200 shrink-0">
+                        <div class="min-w-0">
+                            <p class="text-sm font-semibold text-gray-900 truncate">{{ person.name }}</p>
+                            <p class="text-[11px] text-gray-400 mt-0.5">
+                                Hạn {{ person.deadline|date:"d/m/Y" }}
+                                {% if person.is_overdue %}<span class="text-red-500 font-medium"> · Quá hạn</span>{% endif %}
+                            </p>
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-medium {{ person.status_pill }}">
+                            {{ person.status_label }}
+                        </span>
+                        {% if person.grade %}
+                        <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-medium bg-violet-50 text-violet-700 ring-1 ring-violet-600/15">
+                            {{ person.grade }}
+                        </span>
+                        {% endif %}
+                        <a href="{{ person.detail_url }}"
+                           class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 transition">
+                            <i class="fas fa-external-link-alt"></i> Xem bài
+                        </a>
+                        {% if person.review_url and request.user.is_director %}
+                        <button type="button"
+                                class="btn-grade inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-white hover:bg-blue-800"
+                                data-target-name="{{ person.name|escape }}"
+                                data-action="{{ person.review_url }}">
+                            <i class="fas fa-pen-to-square"></i> Nghiệm thu
+                        </button>
+                        {% endif %}
+                    </div>
+                </li>
+                {% empty %}
+                <li class="px-5 py-8 text-center text-sm text-gray-400">Chưa có thành viên trong tổ này</li>
+                {% endfor %}
+            </ul>
+        </section>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if assignments %}
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
             <h2 class="text-base font-semibold text-gray-800">
@@ -178,6 +268,7 @@
             </table>
         </div>
     </div>
+    {% endif %}
 
     {% if task.is_team_task %}
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -219,7 +310,6 @@
     {% endif %}
 </div>
 
-{# Modal nghiệm thu 3 mức #}
 <div id="grade-modal" class="hidden fixed inset-0 z-50">
     <div class="absolute inset-0 bg-black/40" data-close-grade></div>
     <div class="relative min-h-full flex items-center justify-center p-4">
