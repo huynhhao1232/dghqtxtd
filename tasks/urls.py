@@ -6,6 +6,9 @@ urlpatterns = [
     # Notifications
     path('notifications/<int:pk>/read/', views.notification_read, name='notification_read'),
 
+    # Kanban modal — chi tiết task (JSON)
+    path('api/tasks/<int:pk>/', views.task_detail_api, name='task_detail_api'),
+
     # Staff
     path('staff/', views.staff_dashboard, name='staff_dashboard'),
     path('staff/tasks/', views.staff_my_tasks, name='staff_my_tasks'),

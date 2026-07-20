@@ -14,11 +14,15 @@
          data-status="{{ column_key }}">
         {% for row in column_rows %}
         <article class="kanban-card bg-white rounded-xl border border-gray-100 shadow-sm p-3.5
-                        {% if row.can_drag %}cursor-grab active:cursor-grabbing{% else %}cursor-default{% endif %}"
+                        hover:border-blue-200 hover:shadow-md transition-shadow
+                        {% if row.can_drag %}cursor-grab active:cursor-grabbing{% else %}cursor-pointer{% endif %}"
                  data-task-id="{{ row.task.pk }}"
-                 data-can-drag="{% if row.can_drag %}1{% else %}0{% endif %}">
+                 data-can-drag="{% if row.can_drag %}1{% else %}0{% endif %}"
+                 role="button"
+                 tabindex="0"
+                 title="Xem chi tiết">
             <div class="flex items-start justify-between gap-2">
-                <p class="text-sm font-semibold text-gray-900 leading-snug">{{ row.task.title }}</p>
+                <p class="text-sm font-semibold text-gray-900 leading-snug kanban-card-title">{{ row.task.title }}</p>
                 {% if row.action %}
                 <a href="{{ row.action.url }}"
                    class="shrink-0 text-gray-300 hover:text-primary p-0.5"

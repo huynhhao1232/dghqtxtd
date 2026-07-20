@@ -1892,3 +1892,99 @@ def manager_export_excel(request):
     filename = f'thong_ke_{scope}_{period}_{period_label}.xlsx'.replace('–', '-')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
+
+
+# ───────────────────────── Task detail API (Kanban modal) ─────────────────────────
+
+
+def _safe_file_url(file_field):
+    """Trả về URL media / signed S3; None nếu file trống hoặc storage lỗi."""
+    if not file_field:
+        return None
+    try:
+        return file_field.url
+    except (ValueError, OSError):
+        return None
+
+
+def _collect_task_proofs(task):
+    """Gom minh chứng assignment + phối hợp + file đính kèm giao việc."""
+    proofs = []
+    for asg in task.assignments.all():
+        url = _safe_file_url(asg.proof_file)
+        if url:
+            proofs.append({'name': asg.proof_display_name or 'Minh chứng', 'url': url})
+    for cp in task.coordinating_proofs.all():
+        url = _safe_file_url(cp.proof_file)
+        if url:
+            proofs.append({'name': cp.display_name or 'Minh chứng phối hợp', 'url': url})
+    for att in task.attachments.all():
+        url = _safe_file_url(att.file)
+        if url:
+            proofs.append({'name': att.display_name or 'File đính kèm', 'url': url})
+    return proofs
+
+
+@login_required
+@require_http_methods(['GET'])
+def task_detail_api(request, pk):
+    """
+    GET /api/tasks/<pk>/ — JSON chi tiết task cho modal Kanban.
+    pk khớp data-task-id (Task.id); cũng chấp nhận TaskAssignment.id như staff_task_detail.
+    """
+    try:
+        assignment = _get_staff_assignment(request, pk)
+    except PermissionDenied:
+        return JsonResponse(
+            {'error': 'Bạn không có quyền xem nhiệm vụ này.'},
+            status=403,
+        )
+    except Http404:
+        return JsonResponse({'error': 'Không tìm thấy nhiệm vụ.'}, status=404)
+
+    task = (
+        Task.objects.select_related('created_by')
+        .prefetch_related(
+            'assignments__assignee',
+            'assignments__assignee_department',
+            'attachments',
+            'coordinating_proofs',
+        )
+        .filter(pk=assignment.task_id)
+        .first()
+    ) or assignment.task
+
+    display = _task_display_status(task)
+    assignee_names = [
+        asg.target_display_name for asg in task.assignments.all()
+    ]
+    assignee_name = ', '.join(assignee_names) if assignee_names else '—'
+
+    review_asg = assignment
+    if task.is_team_task:
+        canonical = task.get_canonical_assignment()
+        if canonical:
+            review_asg = canonical
+
+    grade = (
+        review_asg.evaluation_result_label
+        if review_asg.evaluation_result
+        else '—'
+    )
+    score = review_asg.penalty_score if review_asg.evaluation_result else None
+    comment = review_asg.manager_comment or ''
+
+    return JsonResponse({
+        'id': task.pk,
+        'title': task.title,
+        'description': task.description or '',
+        'assignee': assignee_name,
+        'assignee_name': assignee_name,
+        'deadline': task.deadline.strftime('%d/%m/%Y') if task.deadline else '—',
+        'status': display,
+        'status_display': STATUS_LABELS.get(display, display),
+        'grade': grade,
+        'score': score,
+        'comment': comment,
+        'proofs': _collect_task_proofs(task),
+    })

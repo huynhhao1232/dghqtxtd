@@ -81,6 +81,74 @@
     {% endif %}
 </div>
 
+{# ── Task detail modal (Kanban click) ── #}
+<div id="taskModal"
+     class="fixed inset-0 z-[60] bg-gray-900/60 backdrop-blur-sm hidden items-center justify-center opacity-0 transition-opacity duration-300 p-4"
+     role="dialog" aria-modal="true" aria-labelledby="modalTaskTitle">
+    <div id="taskModalContent"
+         class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col transform scale-95 transition-transform duration-300"
+         onclick="event.stopPropagation()">
+        <div class="bg-gray-50 px-6 py-4 border-b flex justify-between items-center gap-3 shrink-0">
+            <h2 id="modalTaskTitle" class="text-lg font-semibold text-gray-900 truncate pr-2">Chi tiết công việc</h2>
+            <button type="button" id="btnCloseTaskModal"
+                    class="p-2 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                    aria-label="Đóng">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+
+        <div class="relative flex-1 min-h-0 overflow-hidden">
+            <div id="modalLoading"
+                 class="absolute inset-0 z-10 hidden items-center justify-center bg-white/80">
+                <div class="flex flex-col items-center gap-3 text-primary">
+                    <i class="fas fa-circle-notch fa-spin text-3xl"></i>
+                    <span class="text-sm text-gray-500">Đang tải...</span>
+                </div>
+            </div>
+
+            <div id="modalTaskBody" class="p-6 overflow-y-auto max-h-[calc(90vh-4.5rem)] grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="md:col-span-2 space-y-6">
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Mô tả công việc</p>
+                        <p id="modalTaskDesc" class="text-sm text-gray-800 leading-relaxed whitespace-pre-line">—</p>
+                    </div>
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Minh chứng đính kèm</p>
+                        <div id="modalTaskProofs" class="space-y-2 text-sm text-gray-600">
+                            <p class="text-gray-400">Chưa có minh chứng</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-4">
+                    <div class="rounded-2xl bg-gray-50 border border-gray-100 p-4 space-y-3">
+                        <div>
+                            <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Người thực hiện</p>
+                            <p id="modalTaskAssignee" class="mt-1 text-sm font-medium text-gray-900">—</p>
+                        </div>
+                        <div>
+                            <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Hạn chót</p>
+                            <p id="modalTaskDeadline" class="mt-1 text-sm font-medium text-gray-900">—</p>
+                        </div>
+                        <div>
+                            <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Trạng thái</p>
+                            <p id="modalTaskStatus" class="mt-1">
+                                <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">—</span>
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="rounded-2xl border border-gray-100 p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Đánh giá / Chấm điểm</p>
+                        <p id="modalTaskGrade" class="text-2xl font-bold text-emerald-600">—</p>
+                        <p id="modalTaskComment" class="mt-2 text-sm text-gray-600 whitespace-pre-line">—</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% if can_assign %}
 {# ── Assign modal ── #}
 <div id="assign-modal" class="{% if not show_assign_modal %}hidden{% endif %} fixed inset-0 z-50" role="dialog" aria-modal="true">
@@ -189,6 +257,56 @@
     }
 
     var board = document.getElementById('kanban-board');
+    var dragSuppressClick = false;
+    var pointerStart = null;
+    var CLICK_MOVE_THRESHOLD = 8;
+
+    if (board) {
+        board.addEventListener('pointerdown', function (e) {
+            var card = e.target.closest('.kanban-card');
+            if (!card || e.target.closest('a')) {
+                pointerStart = null;
+                return;
+            }
+            dragSuppressClick = false;
+            pointerStart = { x: e.clientX, y: e.clientY };
+        });
+        board.addEventListener('pointermove', function (e) {
+            if (!pointerStart) return;
+            var dx = Math.abs(e.clientX - pointerStart.x);
+            var dy = Math.abs(e.clientY - pointerStart.y);
+            if (dx > CLICK_MOVE_THRESHOLD || dy > CLICK_MOVE_THRESHOLD) {
+                dragSuppressClick = true;
+            }
+        });
+        board.addEventListener('pointerup', function () {
+            pointerStart = null;
+        });
+        board.addEventListener('pointercancel', function () {
+            pointerStart = null;
+            dragSuppressClick = true;
+        });
+        board.addEventListener('click', function (e) {
+            if (e.target.closest('a')) return;
+            var card = e.target.closest('.kanban-card');
+            if (!card) return;
+            if (dragSuppressClick) {
+                dragSuppressClick = false;
+                return;
+            }
+            var taskId = card.getAttribute('data-task-id');
+            if (taskId) openTaskModal(taskId);
+        });
+        board.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            var card = e.target.closest('.kanban-card');
+            if (!card) return;
+            e.preventDefault();
+            var taskId = card.getAttribute('data-task-id');
+            if (taskId) openTaskModal(taskId);
+        });
+    }
+
     if (board && typeof Sortable !== 'undefined' && board.getAttribute('data-can-drag') === '1') {
         var statusUrl = board.getAttribute('data-status-url');
         var csrfToken = getCookie('csrftoken') || '{{ csrf_token }}';
@@ -201,7 +319,16 @@
                 draggable: '.kanban-card[data-can-drag="1"]',
                 ghostClass: 'opacity-40',
                 chosenClass: 'ring-2 ring-blue-300',
+                delay: 120,
+                delayOnTouchOnly: true,
+                onStart: function () {
+                    dragSuppressClick = true;
+                },
                 onEnd: function (evt) {
+                    // Tránh mở modal ngay sau khi thả thẻ
+                    dragSuppressClick = true;
+                    setTimeout(function () { dragSuppressClick = false; }, 50);
+
                     if (!evt.to || (evt.from === evt.to && evt.oldIndex === evt.newIndex)) return;
                     var card = evt.item;
                     var taskId = card.getAttribute('data-task-id');
@@ -237,6 +364,154 @@
             });
         });
     }
+
+    var taskModal = document.getElementById('taskModal');
+    var taskModalContent = document.getElementById('taskModalContent');
+    var modalLoading = document.getElementById('modalLoading');
+    var modalBody = document.getElementById('modalTaskBody');
+    var closeTimer = null;
+
+    function escapeHtml(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function setLoading(on) {
+        if (!modalLoading) return;
+        if (on) {
+            modalLoading.classList.remove('hidden');
+            modalLoading.classList.add('flex');
+            if (modalBody) modalBody.classList.add('opacity-40');
+        } else {
+            modalLoading.classList.add('hidden');
+            modalLoading.classList.remove('flex');
+            if (modalBody) modalBody.classList.remove('opacity-40');
+        }
+    }
+
+    function fillProofs(proofs) {
+        var el = document.getElementById('modalTaskProofs');
+        if (!el) return;
+        if (!proofs || !proofs.length) {
+            el.innerHTML = '<p class="text-gray-400">Chưa có minh chứng</p>';
+            return;
+        }
+        el.innerHTML = proofs.map(function (p) {
+            var name = escapeHtml(p.name || 'Tệp');
+            var url = escapeHtml(p.url || '#');
+            return (
+                '<a href="' + url + '" target="_blank" rel="noopener" ' +
+                'class="flex items-center gap-2 px-3 py-2 rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50 text-primary transition">' +
+                '<i class="fas fa-paperclip text-gray-400"></i>' +
+                '<span class="truncate">' + name + '</span>' +
+                '</a>'
+            );
+        }).join('');
+    }
+
+    window.openTaskModal = function openTaskModal(taskId) {
+        if (!taskModal || !taskId) return;
+        if (closeTimer) {
+            clearTimeout(closeTimer);
+            closeTimer = null;
+        }
+        taskModal.classList.remove('hidden');
+        taskModal.classList.add('flex');
+        document.body.classList.add('overflow-hidden');
+        requestAnimationFrame(function () {
+            taskModal.classList.add('opacity-100');
+            if (taskModalContent) {
+                taskModalContent.classList.remove('scale-95');
+                taskModalContent.classList.add('scale-100');
+            }
+        });
+
+        document.getElementById('modalTaskTitle').textContent = 'Đang tải...';
+        document.getElementById('modalTaskDesc').textContent = '—';
+        document.getElementById('modalTaskAssignee').textContent = '—';
+        document.getElementById('modalTaskDeadline').textContent = '—';
+        document.getElementById('modalTaskGrade').textContent = '—';
+        document.getElementById('modalTaskComment').textContent = '—';
+        document.getElementById('modalTaskStatus').innerHTML =
+            '<span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">—</span>';
+        fillProofs([]);
+        setLoading(true);
+
+        fetch('/api/tasks/' + encodeURIComponent(taskId) + '/', {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+        }).then(function (res) {
+            return res.json().then(function (data) {
+                return { ok: res.ok, status: res.status, data: data };
+            });
+        }).then(function (result) {
+            setLoading(false);
+            if (!result.ok) {
+                document.getElementById('modalTaskTitle').textContent = 'Không tải được';
+                document.getElementById('modalTaskDesc').textContent =
+                    (result.data && result.data.error) || ('Lỗi ' + result.status);
+                return;
+            }
+            var data = result.data;
+            document.getElementById('modalTaskTitle').textContent = data.title || 'Chi tiết công việc';
+            document.getElementById('modalTaskDesc').textContent = data.description || 'Không có mô tả';
+            document.getElementById('modalTaskAssignee').textContent = data.assignee_name || data.assignee || '—';
+            document.getElementById('modalTaskDeadline').textContent = data.deadline || '—';
+            document.getElementById('modalTaskStatus').innerHTML =
+                '<span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-50 text-sky-800 border border-sky-100">' +
+                escapeHtml(data.status_display || data.status || '—') +
+                '</span>';
+
+            var gradeText = data.grade || '—';
+            if (data.score != null && data.score !== '' && Number(data.score) > 0) {
+                gradeText = gradeText + ' (−' + data.score + ')';
+            }
+            var gradeEl = document.getElementById('modalTaskGrade');
+            gradeEl.textContent = gradeText;
+            gradeEl.className = (gradeText === '—' || gradeText.indexOf('Chưa') === 0)
+                ? 'text-2xl font-bold text-gray-400'
+                : 'text-2xl font-bold text-emerald-600';
+            document.getElementById('modalTaskComment').textContent = data.comment || 'Chưa có nhận xét';
+            fillProofs(data.proofs || []);
+        }).catch(function () {
+            setLoading(false);
+            document.getElementById('modalTaskTitle').textContent = 'Lỗi kết nối';
+            document.getElementById('modalTaskDesc').textContent = 'Không thể tải chi tiết công việc. Thử lại sau.';
+        });
+    };
+
+    window.closeModal = function closeModal() {
+        if (!taskModal) return;
+        taskModal.classList.remove('opacity-100');
+        if (taskModalContent) {
+            taskModalContent.classList.remove('scale-100');
+            taskModalContent.classList.add('scale-95');
+        }
+        closeTimer = setTimeout(function () {
+            taskModal.classList.add('hidden');
+            taskModal.classList.remove('flex');
+            document.body.classList.remove('overflow-hidden');
+            setLoading(false);
+            closeTimer = null;
+        }, 280);
+    };
+
+    var btnClose = document.getElementById('btnCloseTaskModal');
+    if (btnClose) btnClose.addEventListener('click', window.closeModal);
+    if (taskModal) {
+        taskModal.addEventListener('click', function (e) {
+            if (e.target === taskModal) window.closeModal();
+        });
+    }
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && taskModal && !taskModal.classList.contains('hidden')) {
+            window.closeModal();
+        }
+    });
 })();
 </script>
 {% if can_assign %}
@@ -250,17 +525,17 @@
         modal.classList.remove('hidden');
         document.body.classList.add('overflow-hidden');
     }
-    function closeModal() {
+    function closeAssignModal() {
         modal.classList.add('hidden');
         document.body.classList.remove('overflow-hidden');
     }
 
     if (openBtn) openBtn.addEventListener('click', openModal);
     modal.querySelectorAll('[data-close-modal]').forEach(function (el) {
-        el.addEventListener('click', closeModal);
+        el.addEventListener('click', closeAssignModal);
     });
     document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeAssignModal();
     });
 
     var STAFF = {{ member_options_json|safe }};
