@@ -28,16 +28,18 @@ class UserAdmin(DjangoUserAdmin):
         'first_name',
         'last_name',
         'position',
+        'role',
         'is_manager',
         'is_active',
     )
-    list_filter = ('is_manager', 'is_active')
+    list_filter = ('role', 'is_manager', 'is_active')
     search_fields = ('username', 'first_name', 'last_name', 'email')
     fieldsets = DjangoUserAdmin.fieldsets + (
         (
             'Thông tin tổ chức',
             {
                 'fields': (
+                    'role',
                     'is_manager',
                     'position',
                     'phone',
@@ -51,6 +53,7 @@ class UserAdmin(DjangoUserAdmin):
             'Thông tin tổ chức',
             {
                 'fields': (
+                    'role',
                     'is_manager',
                     'position',
                     'phone',

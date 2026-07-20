@@ -164,7 +164,7 @@
                             <img class="h-9 w-9 rounded-full object-cover border border-gray-200" src="{{ user.avatar_url }}" alt="Avatar">
                             <div class="hidden sm:flex sm:flex-col sm:items-start">
                                 <span class="text-sm font-bold text-gray-700">{{ user.get_full_name|default:user.username }}</span>
-                                <span class="text-xs font-medium text-gray-500">{% if user.is_manager %}Quản lý{% else %}Nhân viên{% endif %}</span>
+                                <span class="text-xs font-medium text-gray-500">{{ user.role_label }}</span>
                             </div>
                             <i class="fas fa-chevron-down text-xs text-gray-400 hidden sm:block ml-1"></i>
                         </button>
@@ -473,7 +473,7 @@
     </script>
     {% block extra_js %}{% endblock %}
 
-    {% if user.is_manager %}
+    {% if request.user.is_director or request.user.is_department %}
     <a href="{% url 'manager_create_task' %}"
        aria-label="Giao việc mới"
        title="Giao việc mới"

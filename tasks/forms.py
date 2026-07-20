@@ -56,7 +56,13 @@ class MultipleFileField(forms.FileField):
         return result
 
 
-class TaskCreateForm(forms.ModelForm):
+class TaskAssignForm(forms.ModelForm):
+    """Form giao việc với lọc người nhận theo role của người giao.
+
+    Naming note: AbstractUser.is_staff là cờ Django admin — RBAC app dùng
+    user.is_director / user.is_department / user.is_staff_member.
+    """
+
     ASSIGN_INDIVIDUAL = 'individual'
     ASSIGN_DEPARTMENT = 'department'
     ASSIGN_BATCH_DEPARTMENT = 'batch_department'
@@ -73,7 +79,7 @@ class TaskCreateForm(forms.ModelForm):
         label='Hình thức giao việc',
     )
     assignees = forms.ModelMultipleChoiceField(
-        queryset=User.objects.filter(is_manager=False, is_active=True),
+        queryset=User.objects.none(),
         required=False,
         label='Người nhận',
         widget=forms.MultipleHiddenInput,
@@ -152,12 +158,12 @@ class TaskCreateForm(forms.ModelForm):
             'cycle': forms.Select(attrs={'class': INPUT_CLASS}),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, user=None, **kwargs):
+        self.user = user
         super().__init__(*args, **kwargs)
         dept_qs = Department.objects.select_related('leader').all()
-        self.fields['assignees'].queryset = User.objects.filter(
-            is_manager=False, is_active=True
-        ).prefetch_related('my_departments').order_by('last_name', 'first_name')
+        assignee_qs = User.assignable_queryset_for(user).prefetch_related('my_departments')
+        self.fields['assignees'].queryset = assignee_qs
         self.fields['primary_department'].queryset = dept_qs
         self.fields['coordinating_departments'].queryset = dept_qs
         self.fields['batch_departments'].queryset = dept_qs
@@ -169,10 +175,10 @@ class TaskCreateForm(forms.ModelForm):
                 f'{label} "{dept.name}" chưa có Trưởng tổ. Vui lòng chỉ định Trưởng tổ trước.'
             )
         leader = dept.leader
-        if not leader.is_active or leader.is_manager:
+        if not leader.is_active or leader.is_director:
             raise forms.ValidationError(
                 f'Trưởng tổ của {label.lower()} "{dept.name}" không hợp lệ '
-                f'(cần tài khoản nhân viên đang hoạt động).'
+                f'(cần tài khoản Tổ chuyên môn / Giáo viên đang hoạt động).'
             )
         return leader
 
@@ -231,6 +237,10 @@ class TaskCreateForm(forms.ModelForm):
                 )
         cleaned['attachments'] = files
         return cleaned
+
+
+# Alias tương thích ngược với tên cũ
+TaskCreateForm = TaskAssignForm
 
 
 class StaffTaskUpdateForm(forms.ModelForm):
@@ -336,7 +346,9 @@ class AddMembersForm(forms.Form):
 
     def __init__(self, *args, department=None, exclude_ids=None, **kwargs):
         super().__init__(*args, **kwargs)
-        qs = User.objects.filter(is_manager=False, is_active=True)
+        qs = User.objects.filter(
+            is_active=True,
+        ).exclude(role=User.ROLE_DIRECTOR)
         if department:
             qs = qs.filter(my_departments=department)
         if exclude_ids:
@@ -467,8 +479,7 @@ class SubtaskCreateForm(forms.Form):
             qs = User.objects.filter(
                 pk__in=participant_ids,
                 is_active=True,
-                is_manager=False,
-            ).order_by('last_name', 'first_name')
+            ).exclude(role=User.ROLE_DIRECTOR).order_by('last_name', 'first_name')
             self.fields['deadline'].widget.attrs['max'] = parent_task.deadline.isoformat()
             self.fields['deadline'].initial = parent_task.deadline
         self.fields['assignees'].queryset = qs

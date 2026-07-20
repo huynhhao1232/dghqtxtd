@@ -41,11 +41,13 @@
             <p class="text-xs font-semibold text-gray-400 uppercase">Nhân viên</p>
             <p class="text-3xl font-bold text-gray-800 mt-1">{{ staff_count }}</p>
         </div>
+        {% if request.user.is_director or request.user.is_department %}
         <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm flex items-center">
             <a href="{% url 'manager_create_task' %}" class="w-full text-center py-3 bg-primary text-white rounded-lg font-medium hover:bg-blue-800 transition-colors">
                 <i class="fas fa-plus mr-2"></i> Giao việc mới
             </a>
         </div>
+        {% endif %}
     </div>
 
     <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">

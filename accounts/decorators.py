@@ -7,7 +7,7 @@ from django.shortcuts import redirect
 
 def redirect_by_role(user):
     """Điều hướng sau đăng nhập theo Role."""
-    if user.is_manager:
+    if user.is_director or user.is_manager:
         return redirect('manager_dashboard')
     return redirect('staff_dashboard')
 
@@ -18,8 +18,21 @@ def manager_required(view_func):
     @wraps(view_func)
     @login_required
     def _wrapped(request, *args, **kwargs):
-        if not request.user.is_manager:
+        if not (request.user.is_director or request.user.is_manager):
             raise PermissionDenied('Bạn không có quyền truy cập khu vực Lãnh đạo.')
+        return view_func(request, *args, **kwargs)
+
+    return _wrapped
+
+
+def can_assign_required(view_func):
+    """Cho phép Ban Giám đốc hoặc Tổ chuyên môn giao việc; staff → 403."""
+
+    @wraps(view_func)
+    @login_required
+    def _wrapped(request, *args, **kwargs):
+        if not request.user.can_assign_tasks():
+            raise PermissionDenied('Bạn không có quyền giao việc.')
         return view_func(request, *args, **kwargs)
 
     return _wrapped

@@ -8,7 +8,7 @@ from tasks.models import Task, TaskAssignment
 
 
 class Command(BaseCommand):
-    help = 'Tạo dữ liệu demo: tổ nhóm, lãnh đạo, nhân viên và task mẫu'
+    help = 'Tạo dữ liệu demo: tổ nhóm, lãnh đạo, tổ chuyên môn, GV và task mẫu'
 
     def handle(self, *args, **options):
         dept_toan, _ = Department.objects.get_or_create(
@@ -39,15 +39,18 @@ class Command(BaseCommand):
                 'first_name': 'Văn',
                 'last_name': 'Nguyễn',
                 'email': 'lanhdao@example.com',
+                'role': User.ROLE_DIRECTOR,
                 'is_manager': True,
                 'is_staff': True,
                 'position': 'Phó Hiệu trưởng',
                 'phone': '0901000001',
             },
         )
+        manager.role = User.ROLE_DIRECTOR
+        manager.is_manager = True
         if created or not manager.has_usable_password():
             manager.set_password('Demo@123')
-            manager.save()
+        manager.save()
         dept_bgh.leader = manager
         dept_bgh.save(update_fields=['leader'])
         dept_bgh.members.add(manager)
@@ -59,8 +62,9 @@ class Command(BaseCommand):
                 'last_name': 'Trần',
                 'email': 'nv1@example.com',
                 'departments': [dept_toan],
-                'position': 'Giáo viên',
+                'position': 'Tổ trưởng Tổ Toán-Tin',
                 'phone': '0901000002',
+                'role': User.ROLE_DEPARTMENT,
                 'is_leader': True,
                 'lead_dept': dept_toan,
             },
@@ -70,8 +74,9 @@ class Command(BaseCommand):
                 'last_name': 'Lê',
                 'email': 'nv2@example.com',
                 'departments': [dept_van],
-                'position': 'Giáo viên',
+                'position': 'Tổ trưởng Tổ Văn',
                 'phone': '0901000003',
+                'role': User.ROLE_DEPARTMENT,
                 'is_leader': True,
                 'lead_dept': dept_van,
             },
@@ -84,6 +89,7 @@ class Command(BaseCommand):
                 'departments': [dept_toan, dept_van],
                 'position': 'Giáo viên',
                 'phone': '0901000004',
+                'role': User.ROLE_STAFF,
                 'is_leader': False,
                 'lead_dept': None,
             },
@@ -93,20 +99,22 @@ class Command(BaseCommand):
             is_leader = spec.pop('is_leader')
             lead_dept = spec.pop('lead_dept')
             departments = spec.pop('departments')
+            role = spec.pop('role')
             user, created = User.objects.get_or_create(
                 username=spec['username'],
                 defaults={
                     **{k: v for k, v in spec.items() if k != 'username'},
+                    'role': role,
                     'is_manager': False,
                     'is_staff': True,
                 },
             )
-            if not created:
-                user.position = spec['position']
-                user.save(update_fields=['position'])
+            user.role = role
+            user.is_manager = False
+            user.position = spec['position']
             if created or not user.has_usable_password():
                 user.set_password('Demo@123')
-                user.save()
+            user.save()
             user.my_departments.set(departments)
             if is_leader and lead_dept:
                 lead_dept.leader = user
@@ -120,15 +128,20 @@ class Command(BaseCommand):
                 'first_name': 'Admin',
                 'last_name': 'System',
                 'email': 'admin@example.com',
+                'role': User.ROLE_DIRECTOR,
                 'is_manager': True,
                 'is_staff': True,
                 'is_superuser': True,
                 'position': 'Quản trị viên',
             },
         )
+        admin.role = User.ROLE_DIRECTOR
+        admin.is_manager = True
+        admin.is_superuser = True
+        admin.is_staff = True
         if created or not admin.has_usable_password():
             admin.set_password('Admin@123')
-            admin.save()
+        admin.save()
         dept_bgh.members.add(admin)
 
         if not Task.objects.exists():
@@ -148,7 +161,9 @@ class Command(BaseCommand):
             if dept_van.leader_id:
                 TaskAssignment.objects.create(task=task, assignee=dept_van.leader)
             else:
-                member = dept_toan.members.filter(is_manager=False).first()
+                member = dept_toan.members.exclude(
+                    role=User.ROLE_DIRECTOR
+                ).first()
                 if member and not leader:
                     TaskAssignment.objects.create(task=task, assignee=member)
 
@@ -166,8 +181,8 @@ class Command(BaseCommand):
             )
 
         self.stdout.write(self.style.SUCCESS('Đã tạo dữ liệu demo.'))
-        self.stdout.write('  Lãnh đạo : lanhdao / Demo@123')
-        self.stdout.write('  Nhân viên: nhanvien1 / Demo@123 (Tổ Toán-Tin — Trưởng tổ)')
-        self.stdout.write('  Nhân viên: nhanvien2 / Demo@123 (Tổ Văn — Trưởng tổ)')
-        self.stdout.write('  Nhân viên: nhanvien3 / Demo@123 (Tổ Toán-Tin + Tổ Văn)')
-        self.stdout.write('  Admin    : admin / Admin@123')
+        self.stdout.write('  Ban Giám đốc (director): lanhdao / Demo@123')
+        self.stdout.write('  Tổ chuyên môn (department): nhanvien1 / Demo@123 (Tổ Toán-Tin)')
+        self.stdout.write('  Tổ chuyên môn (department): nhanvien2 / Demo@123 (Tổ Văn)')
+        self.stdout.write('  Giáo viên (staff): nhanvien3 / Demo@123 (Tổ Toán-Tin + Tổ Văn)')
+        self.stdout.write('  Admin (director): admin / Admin@123')

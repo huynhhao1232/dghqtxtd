@@ -180,9 +180,9 @@ if _cookie_secure in ('1', 'true', 'yes', 'on'):
 elif _cookie_secure in ('0', 'false', 'no', 'off'):
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
-elif not DEBUG:
-    SESSION_COOKIE_SECURE = True
-    CSRF_COOKIE_SECURE = True
+else:
+    SESSION_COOKIE_SECURE = not DEBUG
+    CSRF_COOKIE_SECURE = not DEBUG
 
 if SESSION_COOKIE_SECURE or CSRF_COOKIE_SECURE:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

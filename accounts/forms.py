@@ -199,17 +199,17 @@ class StaffEditForm(forms.ModelForm):
 class StaffCreateForm(forms.ModelForm):
     """Form tạo tài khoản mới (Lãnh đạo tạo viên chức / lãnh đạo khác)."""
 
-    ROLE_STAFF = 'staff'
-    ROLE_MANAGER = 'manager'
-    ROLE_CHOICES = [
-        (ROLE_STAFF, 'Nhân viên / Viên chức'),
-        (ROLE_MANAGER, 'Lãnh đạo / Quản lý'),
-    ]
+    ROLE_STAFF = User.ROLE_STAFF
+    ROLE_DEPARTMENT = User.ROLE_DEPARTMENT
+    ROLE_DIRECTOR = User.ROLE_DIRECTOR
+    # Giữ alias cũ cho template/code gọi ROLE_MANAGER
+    ROLE_MANAGER = User.ROLE_DIRECTOR
+    ROLE_CHOICES = User.ROLE_CHOICES
 
     role = forms.ChoiceField(
         choices=ROLE_CHOICES,
         initial=ROLE_STAFF,
-        label='Loại tài khoản',
+        label='Vai trò',
         widget=forms.Select(attrs={'class': INPUT_CLASS}),
     )
     full_name = forms.CharField(
@@ -311,8 +311,9 @@ class StaffCreateForm(forms.ModelForm):
         user.last_name = ''
         user.set_password(self.cleaned_data['password1'])
         role = self.cleaned_data.get('role', self.ROLE_STAFF)
-        user.is_manager = role == self.ROLE_MANAGER
-        user.is_staff = True
+        user.role = role
+        user.is_manager = role == User.ROLE_DIRECTOR
+        user.is_staff = True  # Django admin flag — unrelated to app role staff
         user.is_active = True
         if commit:
             user.save()

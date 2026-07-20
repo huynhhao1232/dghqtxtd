@@ -971,3 +971,126 @@ class ReportingAttributionTestCase(TestCase):
         )
         self.assertGreaterEqual(row['dat_total'], 1)
         self.assertEqual(row['penalty_total'], 0)
+
+
+class RoleBasedAccessControlTestCase(TestCase):
+    """RBAC: director / department / staff — assignee filter, create, list isolation."""
+
+    def setUp(self):
+        self.director = User.objects.create_user(
+            username='dir_rbac',
+            password='x',
+            is_manager=True,
+            first_name='Giám',
+            last_name='Đốc',
+        )
+        self.dept_user = User.objects.create_user(
+            username='dept_rbac',
+            password='x',
+            role=User.ROLE_DEPARTMENT,
+            first_name='Tổ',
+            last_name='Trưởng',
+        )
+        self.staff_user = User.objects.create_user(
+            username='staff_rbac',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='Giáo',
+            last_name='Viên',
+        )
+        self.other_staff = User.objects.create_user(
+            username='other_rbac',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='Khác',
+            last_name='GV',
+        )
+        self.dept = Department.objects.create(name='Tổ RBAC', leader=self.dept_user)
+        self.dept.members.add(self.dept_user, self.staff_user, self.other_staff)
+        self.today = timezone.localdate()
+        self.client = Client()
+
+    def test_role_properties_do_not_shadow_django_is_staff(self):
+        self.assertEqual(self.director.role, User.ROLE_DIRECTOR)
+        self.assertTrue(self.director.is_director)
+        self.assertFalse(self.director.is_department)
+        self.assertFalse(self.director.is_staff_member)
+        self.assertTrue(self.dept_user.is_department)
+        self.assertTrue(self.staff_user.is_staff_member)
+        # App role uses is_staff_member; Django's is_staff remains a model field.
+        self.assertTrue(hasattr(self.staff_user, 'is_staff_member'))
+        self.assertIs(getattr(User, 'is_staff_member', None) is not None, True)
+        field_names = {f.name for f in User._meta.fields}
+        self.assertIn('is_staff', field_names)
+        self.assertNotIn('is_staff_member', field_names)
+
+    def test_assignable_queryset_by_role(self):
+        from .forms import TaskAssignForm
+
+        director_form = TaskAssignForm(user=self.director)
+        director_ids = set(director_form.fields['assignees'].queryset.values_list('pk', flat=True))
+        self.assertIn(self.director.pk, director_ids)
+        self.assertIn(self.staff_user.pk, director_ids)
+
+        dept_form = TaskAssignForm(user=self.dept_user)
+        dept_ids = set(dept_form.fields['assignees'].queryset.values_list('pk', flat=True))
+        self.assertNotIn(self.director.pk, dept_ids)
+        self.assertIn(self.dept_user.pk, dept_ids)
+        self.assertIn(self.staff_user.pk, dept_ids)
+
+        staff_form = TaskAssignForm(user=self.staff_user)
+        self.assertEqual(staff_form.fields['assignees'].queryset.count(), 0)
+
+    def test_staff_cannot_create_task(self):
+        self.client.force_login(self.staff_user)
+        resp = self.client.get(reverse('manager_create_task'))
+        self.assertEqual(resp.status_code, 403)
+
+    def test_department_can_create_task(self):
+        self.client.force_login(self.dept_user)
+        resp = self.client.get(reverse('manager_create_task'))
+        self.assertEqual(resp.status_code, 200)
+        title = 'Việc do tổ giao'
+        post = self.client.post(reverse('manager_create_task'), {
+            'title': title,
+            'description': 'mô tả',
+            'deadline': (self.today + timedelta(days=5)).isoformat(),
+            'cycle': Task.CYCLE_MONTH,
+            'assign_mode': 'individual',
+            'assignees': [self.staff_user.pk],
+        })
+        self.assertEqual(post.status_code, 302)
+        task = Task.objects.get(title=title)
+        self.assertEqual(task.created_by_id, self.dept_user.pk)
+        self.assertTrue(task.assignments.filter(assignee=self.staff_user).exists())
+
+    def test_list_isolation(self):
+        from tasks.views import _manager_tasks_queryset, _staff_assignments_qs
+
+        mine = Task.objects.create(
+            title='Của tổ',
+            created_by=self.dept_user,
+            deadline=self.today + timedelta(days=3),
+            cycle=Task.CYCLE_MONTH,
+        )
+        TaskAssignment.objects.create(task=mine, assignee=self.staff_user)
+
+        others = Task.objects.create(
+            title='Của BGH',
+            created_by=self.director,
+            deadline=self.today + timedelta(days=3),
+            cycle=Task.CYCLE_MONTH,
+        )
+        TaskAssignment.objects.create(task=others, assignee=self.other_staff)
+
+        director_titles = set(_manager_tasks_queryset(self.director).values_list('title', flat=True))
+        self.assertIn('Của tổ', director_titles)
+        self.assertIn('Của BGH', director_titles)
+
+        dept_asg = _staff_assignments_qs(self.dept_user)
+        self.assertTrue(dept_asg.filter(task=mine).exists())
+        self.assertFalse(dept_asg.filter(task=others).exists())
+
+        staff_asg = _staff_assignments_qs(self.staff_user)
+        self.assertTrue(staff_asg.filter(task=mine).exists())
+        self.assertFalse(staff_asg.filter(task=others).exists())

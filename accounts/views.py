@@ -117,7 +117,7 @@ def manager_departments(request):
     member_candidates = []
     if view_dept:
         member_ids = set(view_dept.members.values_list('pk', flat=True))
-        for u in User.objects.filter(is_active=True, is_manager=False).exclude(pk__in=member_ids).order_by(
+        for u in User.objects.filter(is_active=True).exclude(role=User.ROLE_DIRECTOR).exclude(pk__in=member_ids).order_by(
             'last_name', 'first_name'
         ):
             member_candidates.append({
@@ -175,7 +175,7 @@ def department_add_member(request, dept_id):
     if not user_id:
         return JsonResponse({'ok': False, 'error': 'Thiếu user_id.'}, status=400)
 
-    user = get_object_or_404(User, pk=user_id, is_active=True, is_manager=False)
+    user = get_object_or_404(User, pk=user_id, is_active=True)
     if department.members.filter(pk=user.pk).exists():
         return JsonResponse({'ok': False, 'error': 'Người này đã là thành viên của tổ.'}, status=400)
 
@@ -239,7 +239,7 @@ def manager_staff_list(request):
     q = request.GET.get('q', '').strip()
 
     staff_qs = (
-        User.objects.filter(is_manager=False)
+        User.objects.exclude(role=User.ROLE_DIRECTOR)
         .prefetch_related('my_departments')
     )
     if dept_filter:
@@ -264,7 +264,7 @@ def manager_staff_list(request):
     staff_id = request.POST.get('staff_id') or request.GET.get('staff_id')
 
     if request.method == 'GET' and request.GET.get('action') == 'edit' and staff_id:
-        edit_user = get_object_or_404(User, pk=staff_id, is_manager=False)
+        edit_user = get_object_or_404(User, pk=staff_id)
         edit_form = StaffEditForm(instance=edit_user)
 
     if request.method == 'POST':
@@ -273,7 +273,7 @@ def manager_staff_list(request):
             open_create = True
             if create_form.is_valid():
                 user = create_form.save()
-                role_label = 'lãnh đạo' if user.is_manager else 'viên chức'
+                role_label = user.role_label
                 messages.success(
                     request,
                     f'Đã tạo tài khoản {role_label} "{user.get_full_name() or user.username}" '
@@ -281,14 +281,14 @@ def manager_staff_list(request):
                 )
                 return redirect('manager_staff')
         elif action == 'edit' and staff_id:
-            edit_user = get_object_or_404(User, pk=staff_id, is_manager=False)
+            edit_user = get_object_or_404(User, pk=staff_id)
             edit_form = StaffEditForm(request.POST, instance=edit_user)
             if edit_form.is_valid():
                 edit_form.save()
                 messages.success(request, f'Đã cập nhật viên chức "{edit_user}".')
                 return redirect('manager_staff')
         elif action == 'toggle_active' and staff_id:
-            staff = get_object_or_404(User, pk=staff_id, is_manager=False)
+            staff = get_object_or_404(User, pk=staff_id)
             staff.is_active = not staff.is_active
             staff.save(update_fields=['is_active'])
             state = 'mở khóa' if staff.is_active else 'khóa'

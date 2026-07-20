@@ -71,7 +71,7 @@ class Department(models.Model):
         """Thành viên nhóm, Trưởng tổ, hoặc Lãnh đạo cấp cao."""
         if not user or not user.is_authenticated:
             return False
-        if getattr(user, 'is_manager', False):
+        if getattr(user, 'is_director', False) or getattr(user, 'is_manager', False):
             return True
         if self.leader_id == user.id:
             return True
@@ -111,12 +111,29 @@ class GroupPost(models.Model):
 
 
 class User(AbstractUser):
-    """Custom user với phân quyền Lãnh đạo / Nhân viên."""
+    """Custom user với phân quyền theo role (Ban Giám đốc / Tổ chuyên môn / GV)."""
+
+    ROLE_DIRECTOR = 'director'
+    ROLE_DEPARTMENT = 'department'
+    ROLE_STAFF = 'staff'
+    ROLE_CHOICES = [
+        (ROLE_DIRECTOR, 'Ban Giám đốc'),
+        (ROLE_DEPARTMENT, 'Tổ chuyên môn'),
+        (ROLE_STAFF, 'Giáo viên / Nhân viên'),
+    ]
 
     is_manager = models.BooleanField(
         default=False,
         verbose_name='Là lãnh đạo',
-        help_text='Đánh dấu nếu tài khoản thuộc nhóm Lãnh đạo/Quản lý.',
+        help_text='Legacy: True khi role=director (portal quản lý). Không dùng làm role app.',
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=ROLE_CHOICES,
+        default=ROLE_STAFF,
+        verbose_name='Vai trò',
+        help_text='director=Ban Giám đốc, department=Tổ chuyên môn, staff=Giáo viên/NV.',
+        db_index=True,
     )
     position = models.CharField(
         max_length=150,
@@ -144,9 +161,46 @@ class User(AbstractUser):
         from .vietnamese import user_display_full_name
         return user_display_full_name(self)
 
+    def save(self, *args, **kwargs):
+        # Bridge legacy is_manager ↔ Ban Giám đốc; keep flags consistent.
+        if self.is_manager and self.role != self.ROLE_DEPARTMENT:
+            self.role = self.ROLE_DIRECTOR
+        self.is_manager = self.role == self.ROLE_DIRECTOR
+        super().save(*args, **kwargs)
+
     @property
     def role_label(self):
-        return 'Quản lý' if self.is_manager else 'Nhân viên'
+        return dict(self.ROLE_CHOICES).get(self.role, self.role)
+
+    # Naming: AbstractUser already has boolean is_staff (Django admin access).
+    # Use is_director / is_department / is_staff_member for app RBAC — never shadow is_staff.
+    @property
+    def is_director(self):
+        return self.role == self.ROLE_DIRECTOR
+
+    @property
+    def is_department(self):
+        return self.role == self.ROLE_DEPARTMENT
+
+    @property
+    def is_staff_member(self):
+        """App role Giáo viên/NV (role=='staff'). Not Django's is_staff."""
+        return self.role == self.ROLE_STAFF
+
+    def can_assign_tasks(self):
+        return self.role in (self.ROLE_DIRECTOR, self.ROLE_DEPARTMENT)
+
+    @classmethod
+    def assignable_queryset_for(cls, actor):
+        """Người có thể được giao việc theo role của actor."""
+        base = cls.objects.filter(is_active=True).order_by('last_name', 'first_name', 'username')
+        if actor is None or not getattr(actor, 'is_authenticated', False):
+            return cls.objects.none()
+        if actor.is_director:
+            return base
+        if actor.is_department:
+            return base.filter(role__in=[cls.ROLE_DEPARTMENT, cls.ROLE_STAFF])
+        return cls.objects.none()
 
     @property
     def avatar_url(self):

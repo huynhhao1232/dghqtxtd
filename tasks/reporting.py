@@ -307,7 +307,9 @@ def _period_columns(period: str, year: int):
 
 def build_person_matrix(period: str, year: int):
     staff_list = list(
-        User.objects.filter(is_manager=False, is_active=True).order_by(
+        User.objects.filter(is_active=True)
+        .exclude(role=User.ROLE_DIRECTOR)
+        .order_by(
             'last_name', 'first_name'
         )
     )

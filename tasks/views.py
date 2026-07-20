@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 from openpyxl import Workbook
 
-from accounts.decorators import manager_required
+from accounts.decorators import can_assign_required, manager_required
 from accounts.models import Department, User
 
 from .forms import (
@@ -26,6 +26,7 @@ from .forms import (
     SubtaskCreateForm,
     SubtaskEditForm,
     SubtaskReviewForm,
+    TaskAssignForm,
     TaskCreateForm,
     TaskEditForm,
 )
@@ -59,22 +60,30 @@ def _staff_assignment_q(user):
 
 
 def _staff_assignments_qs(user):
-    return (
-        TaskAssignment.objects.filter(_staff_assignment_q(user))
-        .select_related(
-            'task',
-            'task__created_by',
-            'task__primary_department',
-            'task__primary_department__leader',
-            'task__delegated_updater',
-            'task__parent_task',
-            'assignee',
-            'assignee_department',
-            'assignee_department__leader',
-        )
-        .prefetch_related('task__coordinating_departments', 'task__coordinating_departments__leader')
-        .distinct()
+    """
+    Cô lập danh sách việc theo role:
+    - department: việc họ tạo HOẶC được giao
+    - staff: chỉ việc được giao (assignee / trưởng tổ nhận theo tổ)
+    """
+    qs = TaskAssignment.objects.select_related(
+        'task',
+        'task__created_by',
+        'task__primary_department',
+        'task__primary_department__leader',
+        'task__delegated_updater',
+        'task__parent_task',
+        'assignee',
+        'assignee_department',
+        'assignee_department__leader',
+    ).prefetch_related(
+        'task__coordinating_departments',
+        'task__coordinating_departments__leader',
     )
+    if getattr(user, 'is_department', False):
+        qs = qs.filter(Q(task__created_by=user) | _staff_assignment_q(user))
+    else:
+        qs = qs.filter(_staff_assignment_q(user))
+    return qs.distinct()
 
 
 def _get_staff_assignment(request, pk):
@@ -153,9 +162,9 @@ def notification_read(request, pk):
             .filter(_staff_assignment_q(request.user))
             .first()
         )
-        if assignment and not request.user.is_manager:
+        if assignment and not (request.user.is_director or request.user.is_manager):
             return redirect('staff_task_detail', pk=assignment.pk)
-        if request.user.is_manager:
+        if request.user.is_director or request.user.is_manager:
             task = Task.objects.filter(pk=notification.related_task_id).first()
             if task and not task.is_subtask:
                 return redirect('manager_task_detail', pk=task.pk)
@@ -174,7 +183,7 @@ def notification_read(request, pk):
 
 @login_required
 def staff_dashboard(request):
-    if request.user.is_manager:
+    if request.user.is_director or request.user.is_manager:
         return redirect('manager_dashboard')
 
     assignments = _staff_assignments_qs(request.user)
@@ -217,7 +226,7 @@ def staff_dashboard(request):
 
 @login_required
 def staff_my_tasks(request):
-    if request.user.is_manager:
+    if request.user.is_director or request.user.is_manager:
         return redirect('manager_dashboard')
 
     assignments = _staff_assignments_qs(request.user).order_by('task__deadline')
@@ -239,7 +248,7 @@ def staff_my_tasks(request):
 @login_required
 @require_http_methods(['GET', 'POST'])
 def staff_task_detail(request, pk):
-    if request.user.is_manager:
+    if request.user.is_director or request.user.is_manager:
         return redirect('manager_dashboard')
 
     assignment = _get_staff_assignment(request, pk)
@@ -355,7 +364,7 @@ def staff_task_detail(request, pk):
             participant_qs = participant_qs.filter(department=batch_dept)
         for p in participant_qs:
             u = p.user
-            if not u.is_active or u.is_manager:
+            if not u.is_active or u.is_director:
                 continue
             subtask_assignee_options.append({
                 'id': u.id,
@@ -472,9 +481,9 @@ def staff_task_detail(request, pk):
         available_members = list(
             User.objects.filter(
                 my_departments=manage_dept,
-                is_manager=False,
                 is_active=True,
             )
+            .exclude(role=User.ROLE_DIRECTOR)
             .exclude(pk__in=existing_ids)
             .order_by('last_name', 'first_name')
         )
@@ -546,7 +555,7 @@ def staff_task_detail(request, pk):
 @require_POST
 def staff_task_create_subtask(request, pk):
     """Trưởng tổ tạo nhiệm vụ con trong phạm vi bản phân công của tổ."""
-    if request.user.is_manager:
+    if request.user.is_director or request.user.is_manager:
         return redirect('manager_dashboard')
 
     parent_assignment = _get_staff_assignment(request, pk)
@@ -603,7 +612,7 @@ def _redirect_to_parent_detail(parent, user):
 @require_POST
 def staff_subtask_edit(request, pk):
     """Trưởng tổ Chủ trì sửa tiêu đề, deadline và điểm của nhiệm vụ con."""
-    if request.user.is_manager:
+    if request.user.is_director or request.user.is_manager:
         return redirect('manager_dashboard')
 
     subtask = get_object_or_404(
@@ -642,7 +651,7 @@ def staff_subtask_edit(request, pk):
 @require_POST
 def staff_subtask_delete(request, pk):
     """Trưởng tổ Chủ trì xóa nhiệm vụ con và dữ liệu liên quan (CASCADE)."""
-    if request.user.is_manager:
+    if request.user.is_director or request.user.is_manager:
         return redirect('manager_dashboard')
 
     subtask = get_object_or_404(
@@ -673,7 +682,7 @@ def staff_subtask_review(request, pk):
     Trưởng tổ Chủ trì nghiệm thu assignment của nhiệm vụ con.
     pk = TaskAssignment.pk của sub-task đang chờ duyệt.
     """
-    if request.user.is_manager:
+    if request.user.is_director or request.user.is_manager:
         return redirect('manager_dashboard')
 
     child_assignment = get_object_or_404(
@@ -725,7 +734,7 @@ def staff_subtask_review(request, pk):
 @login_required
 @require_POST
 def staff_task_add_members(request, pk):
-    if request.user.is_manager:
+    if request.user.is_director or request.user.is_manager:
         return redirect('manager_dashboard')
 
     assignment = _get_staff_assignment(request, pk)
@@ -793,7 +802,7 @@ def staff_task_add_members(request, pk):
 @login_required
 @require_POST
 def staff_task_set_delegate(request, pk):
-    if request.user.is_manager:
+    if request.user.is_director or request.user.is_manager:
         return redirect('manager_dashboard')
 
     assignment = _get_staff_assignment(request, pk)
@@ -833,7 +842,7 @@ def staff_task_set_delegate(request, pk):
 @login_required
 @require_POST
 def staff_task_remove_member(request, pk):
-    if request.user.is_manager:
+    if request.user.is_director or request.user.is_manager:
         return redirect('manager_dashboard')
 
     assignment = _get_staff_assignment(request, pk)
@@ -895,7 +904,7 @@ def staff_task_remove_member(request, pk):
 
 @manager_required
 def manager_dashboard(request):
-    staff_qs = User.objects.filter(is_manager=False, is_active=True)
+    staff_qs = User.objects.filter(is_active=True).exclude(role=User.ROLE_DIRECTOR)
     assignments = TaskAssignment.objects.select_related(
         'task',
         'assignee',
@@ -968,14 +977,25 @@ def _storage_upload_error_message(exc):
     return f'Không lưu được file đính kèm: {exc}'
 
 
-@manager_required
+@can_assign_required
 @require_http_methods(['GET', 'POST'])
 def manager_create_task(request):
-    form = TaskCreateForm(request.POST or None, request.FILES or None)
+    """FBV giữ nguyên; tương đương UserPassesTestMixin với can_assign_tasks()."""
+    form = TaskAssignForm(
+        request.POST or None,
+        request.FILES or None,
+        user=request.user,
+    )
     if request.method == 'POST' and form.is_valid():
         mode = form.cleaned_data['assign_mode']
+
+        def _after_create_redirect(task):
+            if request.user.is_director or request.user.is_manager:
+                return redirect('manager_task_detail', pk=task.pk)
+            return redirect('staff_my_tasks')
+
         try:
-            if mode == TaskCreateForm.ASSIGN_BATCH_DEPARTMENT:
+            if mode == TaskAssignForm.ASSIGN_BATCH_DEPARTMENT:
                 departments = list(form.cleaned_data['batch_departments'])
                 attachments = form.cleaned_data.get('attachments') or []
                 with transaction.atomic():
@@ -1011,7 +1031,7 @@ def manager_create_task(request):
                     f'Đã giao nhiệm vụ chung "{task.title}" cho {len(departments)} Tổ/Nhóm '
                     f'(mỗi tổ một bản nộp độc lập).',
                 )
-                return redirect('manager_task_detail', pk=task.pk)
+                return _after_create_redirect(task)
 
             task = form.save(commit=False)
             task.created_by = request.user
@@ -1033,7 +1053,7 @@ def manager_create_task(request):
                 _, created = TaskAssignment.objects.get_or_create(task=task, assignee=user)
                 if created:
                     count += 1
-            if mode == TaskCreateForm.ASSIGN_DEPARTMENT and task.primary_department:
+            if mode == TaskAssignForm.ASSIGN_DEPARTMENT and task.primary_department:
                 coord_names = ', '.join(d.name for d in task.coordinating_departments.all()) or 'không'
                 messages.success(
                     request,
@@ -1042,7 +1062,9 @@ def manager_create_task(request):
                 )
             else:
                 messages.success(request, f'Đã giao việc "{task.title}" cho {count} nhân viên.')
-            return redirect('manager_create_task')
+            if request.user.is_director or request.user.is_manager:
+                return redirect('manager_create_task')
+            return redirect('staff_my_tasks')
         except OSError as exc:
             messages.error(request, _storage_upload_error_message(exc))
         except Exception as exc:
@@ -1061,7 +1083,7 @@ def manager_create_task(request):
                 raise
 
     options = []
-    for u in User.objects.filter(is_manager=False, is_active=True).prefetch_related('my_departments'):
+    for u in form.fields['assignees'].queryset:
         depts = ', '.join(d.name for d in u.my_departments.all())
         options.append({
             'id': u.id,
@@ -1208,8 +1230,11 @@ def _enrich_task_row(task, today):
 
 
 def _manager_tasks_queryset(user=None):
-    """Task gốc (không gồm sub-task). Prefetch để tính badge & tiến độ."""
-    return (
+    """
+    Task gốc (không gồm sub-task). Prefetch để tính badge & tiến độ.
+    RBAC: director → tất cả; department → tạo bởi họ hoặc được giao.
+    """
+    qs = (
         Task.objects.filter(parent_task__isnull=True)
         .select_related('primary_department', 'created_by')
         .prefetch_related(
@@ -1229,6 +1254,18 @@ def _manager_tasks_queryset(user=None):
         )
         .annotate(assignment_count=Count('assignments', distinct=True))
     )
+    if user is None or getattr(user, 'is_director', False) or getattr(user, 'is_manager', False):
+        return qs
+    if getattr(user, 'is_department', False):
+        return qs.filter(
+            Q(created_by=user)
+            | Q(assignments__assignee=user)
+            | Q(assignments__assignee_department__leader=user)
+        ).distinct()
+    return qs.filter(
+        Q(assignments__assignee=user)
+        | Q(assignments__assignee_department__leader=user)
+    ).distinct()
 
 
 @manager_required
@@ -1239,7 +1276,7 @@ def manager_manage_tasks(request):
     status_filter = (request.GET.get('status') or '').strip()
     dept_filter = (request.GET.get('dept') or '').strip()
 
-    base_qs = _manager_tasks_queryset()
+    base_qs = _manager_tasks_queryset(request.user)
 
     # Thống kê trên toàn bộ (trước khi lọc toolbar)
     all_tasks = list(base_qs)
