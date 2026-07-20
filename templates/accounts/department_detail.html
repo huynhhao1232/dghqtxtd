@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+
+{% block title %}{{ department.name }} — Workspace{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto space-y-5">
+
+    {# ── Header card ── #}
+    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 sm:p-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div class="min-w-0">
+                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">Workspace nội bộ</p>
+                <h1 class="text-2xl font-bold text-gray-900 mt-1 flex items-center gap-2.5">
+                    <span class="inline-flex items-center justify-center w-10 h-10 rounded-xl {{ department.badge_classes }} ring-1 ring-inset shrink-0">
+                        <i class="fas fa-briefcase"></i>
+                    </span>
+                    <span class="truncate">{{ department.name }}</span>
+                </h1>
+                <p class="text-sm text-gray-500 mt-1.5">
+                    <i class="fas fa-user-friends text-gray-400 mr-1"></i>
+                    {{ members_count }} thành viên
+                    {% if department.leader %}
+                    <span class="mx-1.5 text-gray-300">·</span>
+                    <i class="fas fa-crown text-amber-500 mr-1"></i>
+                    Trưởng tổ: <strong class="text-gray-700">{{ department.leader }}</strong>
+                    {% endif %}
+                </p>
+            </div>
+            {% if request.user.is_department or request.user.is_director %}
+            <button type="button" id="btn-open-assign-modal"
+                    class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold
+                           bg-primary text-white hover:bg-blue-800 shadow-sm transition-colors shrink-0">
+                <i class="fas fa-plus"></i>
+                Giao việc nội bộ
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    {# ── Quick stats ── #}
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <div class="flex items-center justify-between">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Đang thực hiện</p>
+                <span class="w-9 h-9 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
+                    <i class="fas fa-spinner"></i>
+                </span>
+            </div>
+            <p class="text-3xl font-bold text-sky-700 mt-2">{{ stats.in_progress }}</p>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <div class="flex items-center justify-between">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Chờ nghiệm thu</p>
+                <span class="w-9 h-9 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+                    <i class="fas fa-hourglass-half"></i>
+                </span>
+            </div>
+            <p class="text-3xl font-bold text-amber-600 mt-2">{{ stats.pending }}</p>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <div class="flex items-center justify-between">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Quá hạn</p>
+                <span class="w-9 h-9 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </span>
+            </div>
+            <p class="text-3xl font-bold text-red-600 mt-2">{{ stats.overdue }}</p>
+        </div>
+    </div>
+
+    {# ── Department task list ── #}
+    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+            <h2 class="text-sm font-semibold text-gray-800 uppercase tracking-wide">
+                <i class="fas fa-tasks text-primary mr-1.5"></i>
+                Nhiệm vụ nhóm
+            </h2>
+            <span class="text-xs text-gray-400">{{ task_rows|length }} công việc</span>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead class="bg-gray-50 border-b border-gray-100">
+                    <tr>
+                        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Công việc</th>
+                        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Người nhận</th>
+                        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Hạn</th>
+                        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[9rem]">Tiến độ</th>
+                        <th class="text-right px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Hành động</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {% for row in task_rows %}
+                    <tr class="hover:bg-slate-50/80 transition">
+                        <td class="px-5 py-4 align-top">
+                            <p class="font-semibold text-gray-900 leading-snug">{{ row.task.title }}</p>
+                            <span class="inline-flex mt-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium {{ row.task.display_status_pill }}">
+                                {{ row.task.display_status_label }}
+                            </span>
+                        </td>
+                        <td class="px-5 py-4 align-top">
+                            {% if row.assignees %}
+                            <div class="flex flex-col gap-2">
+                                {% for person in row.assignees|slice:":3" %}
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <img src="{{ person.avatar_url }}" alt=""
+                                         class="w-8 h-8 rounded-full object-cover border border-gray-200 shrink-0">
+                                    <span class="text-sm text-gray-800 truncate">{{ person }}</span>
+                                </div>
+                                {% endfor %}
+                                {% if row.assignees|length > 3 %}
+                                <span class="text-xs text-gray-400">và {{ row.assignees|length|add:"-3" }} người khác</span>
+                                {% endif %}
+                            </div>
+                            {% else %}
+                            <span class="text-xs text-gray-400">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="px-5 py-4 align-top whitespace-nowrap">
+                            {% if row.task.row_is_overdue %}
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-50 text-red-700 text-xs font-semibold border border-red-100">
+                                <i class="fas fa-exclamation-circle"></i>
+                                {{ row.task.deadline|date:"d/m/Y" }}
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-50 text-gray-700 text-xs font-medium border border-gray-100">
+                                <i class="fas fa-calendar-alt text-gray-400"></i>
+                                {{ row.task.deadline|date:"d/m/Y" }}
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="px-5 py-4 align-top">
+                            <div class="flex items-center gap-2 mb-1">
+                                <div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                    <div class="h-full rounded-full transition-all {% if row.task.progress_pct >= 100 %}bg-emerald-500{% elif row.task.progress_pct >= 70 %}bg-amber-400{% elif row.task.progress_pct >= 40 %}bg-blue-500{% else %}bg-gray-400{% endif %}"
+                                         style="width: {{ row.task.progress_pct }}%"></div>
+                                </div>
+                                <span class="text-xs font-semibold text-gray-600 w-8 text-right">{{ row.task.progress_pct }}%</span>
+                            </div>
+                            <p class="text-[11px] text-gray-400">{{ row.task.progress_label }}</p>
+                        </td>
+                        <td class="px-5 py-4 align-top text-right">
+                            {% if row.action %}
+                            <a href="{{ row.action.url }}"
+                               class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors
+                                      {% if row.action.kind == 'review' %}text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100{% else %}text-blue-700 bg-blue-50 border-blue-200 hover:bg-blue-100{% endif %}">
+                                {% if row.action.kind == 'review' %}
+                                <i class="fas fa-clipboard-check"></i>
+                                {% else %}
+                                <i class="fas fa-edit"></i>
+                                {% endif %}
+                                {{ row.action.label }}
+                            </a>
+                            {% else %}
+                            <span class="text-xs text-gray-300">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="px-6 py-16 text-center text-gray-400">
+                            <i class="fas fa-inbox text-3xl mb-3 block text-gray-300"></i>
+                            <p class="text-sm font-medium text-gray-600">Chưa có nhiệm vụ nào</p>
+                            <p class="text-xs text-gray-400 mt-1">
+                                {% if can_assign %}
+                                Bấm «Giao việc nội bộ» để phân công thành viên trong tổ.
+                                {% else %}
+                                Chưa có công việc liên quan đến tổ này.
+                                {% endif %}
+                            </p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% if can_assign %}
+{# ── Assign modal ── #}
+<div id="assign-modal" class="{% if not show_assign_modal %}hidden{% endif %} fixed inset-0 z-50" role="dialog" aria-modal="true">
+    <div class="absolute inset-0 bg-gray-900/40" data-close-modal></div>
+    <div class="relative min-h-full flex items-end sm:items-center justify-center p-4">
+        <div class="w-full max-w-lg bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
+            <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+                <div>
+                    <h3 class="text-base font-semibold text-gray-900">Giao việc nội bộ</h3>
+                    <p class="text-xs text-gray-400 mt-0.5">Chỉ thành viên của {{ department.name }}</p>
+                </div>
+                <button type="button" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700" data-close-modal aria-label="Đóng">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <form method="post" enctype="multipart/form-data" class="p-5 space-y-4" id="dept-assign-form">
+                {% csrf_token %}
+
+                {% if assign_form.non_field_errors %}
+                <div class="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">
+                    {{ assign_form.non_field_errors }}
+                </div>
+                {% endif %}
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1.5">Tên công việc</label>
+                    {{ assign_form.title }}
+                    {% for e in assign_form.title.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1.5">Mô tả</label>
+                    {{ assign_form.description }}
+                    {% for e in assign_form.description.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1.5">Người nhận <span class="text-red-500">*</span></label>
+                    <div class="relative" id="dept-assignee-picker">
+                        <div id="dept-selected-tags" class="flex flex-wrap gap-2 mb-2 min-h-[2px]"></div>
+                        <div class="relative">
+                            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                            <input type="text" id="dept-assignee-search" autocomplete="off"
+                                   placeholder="Tìm thành viên trong tổ..."
+                                   class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl bg-white hover:border-blue-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-sm">
+                        </div>
+                        <div id="dept-assignee-dropdown"
+                             class="hidden absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto"></div>
+                        <div id="dept-assignee-hidden"></div>
+                    </div>
+                    {% for e in assign_form.assignees.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1.5">Thời hạn</label>
+                        <div class="relative">
+                            <i class="fas fa-calendar-alt absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"></i>
+                            {{ assign_form.deadline }}
+                        </div>
+                        {% for e in assign_form.deadline.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1.5">Chu kỳ</label>
+                        {{ assign_form.cycle }}
+                        {% for e in assign_form.cycle.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                        <i class="fas fa-paperclip mr-1 text-gray-400"></i> File đính kèm
+                        <span class="text-gray-400 font-normal">(tùy chọn)</span>
+                    </label>
+                    {{ assign_form.attachments }}
+                    <p class="mt-1 text-xs text-gray-400">
+                        Tối đa {{ max_attachment_count }} file, mỗi file ≤ {{ max_attachment_mb }}MB
+                    </p>
+                </div>
+
+                <div class="flex gap-3 pt-2 border-t border-gray-100">
+                    <button type="submit"
+                            class="inline-flex items-center justify-center px-5 py-2.5 bg-primary text-white text-sm font-semibold rounded-xl hover:bg-blue-800 shadow-sm transition">
+                        <i class="fas fa-paper-plane mr-2"></i> Giao việc
+                    </button>
+                    <button type="button" data-close-modal
+                            class="inline-flex items-center px-5 py-2.5 border border-gray-300 text-sm font-medium rounded-xl text-gray-700 hover:bg-gray-50">
+                        Hủy
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if can_assign %}
+<script>
+(function () {
+    var modal = document.getElementById('assign-modal');
+    var openBtn = document.getElementById('btn-open-assign-modal');
+    if (!modal) return;
+
+    function openModal() {
+        modal.classList.remove('hidden');
+        document.body.classList.add('overflow-hidden');
+    }
+    function closeModal() {
+        modal.classList.add('hidden');
+        document.body.classList.remove('overflow-hidden');
+    }
+
+    if (openBtn) openBtn.addEventListener('click', openModal);
+    modal.querySelectorAll('[data-close-modal]').forEach(function (el) {
+        el.addEventListener('click', closeModal);
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+    });
+
+    var STAFF = {{ member_options_json|safe }};
+    var selected = new Set({{ selected_assignee_ids|safe }}.map(String));
+    var searchInput = document.getElementById('dept-assignee-search');
+    var dropdown = document.getElementById('dept-assignee-dropdown');
+    var tagsEl = document.getElementById('dept-selected-tags');
+    var hiddenEl = document.getElementById('dept-assignee-hidden');
+
+    function renderTags() {
+        tagsEl.innerHTML = '';
+        hiddenEl.innerHTML = '';
+        STAFF.forEach(function (s) {
+            if (!selected.has(String(s.id))) return;
+            var tag = document.createElement('span');
+            tag.className = 'inline-flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-full bg-blue-50 text-primary text-xs font-medium border border-blue-100';
+            tag.innerHTML =
+                '<img src="' + s.avatar + '" class="h-5 w-5 rounded-full object-cover" alt="">' +
+                '<span>' + s.name + '</span>' +
+                '<button type="button" data-id="' + s.id + '" class="ml-0.5 text-blue-400 hover:text-blue-700 remove-tag">&times;</button>';
+            tagsEl.appendChild(tag);
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'assignees';
+            input.value = s.id;
+            hiddenEl.appendChild(input);
+        });
+        tagsEl.querySelectorAll('.remove-tag').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                selected.delete(String(btn.getAttribute('data-id')));
+                renderTags();
+                renderDropdown(searchInput.value);
+            });
+        });
+    }
+
+    function renderDropdown(query) {
+        var q = (query || '').toLowerCase().trim();
+        var html = '';
+        var count = 0;
+        STAFF.forEach(function (s) {
+            if (selected.has(String(s.id))) return;
+            var hay = (s.name + ' ' + s.username + ' ' + (s.department || '')).toLowerCase();
+            if (q && hay.indexOf(q) === -1) return;
+            count++;
+            html +=
+                '<button type="button" data-id="' + s.id + '" class="assignee-option w-full flex items-center gap-3 px-3 py-2.5 hover:bg-blue-50 text-left transition">' +
+                '<img src="' + s.avatar + '" class="h-8 w-8 rounded-full object-cover border border-gray-200" alt="">' +
+                '<span class="flex-1 min-w-0">' +
+                '<span class="block text-sm font-medium text-gray-800 truncate">' + s.name + '</span>' +
+                '<span class="block text-xs text-gray-400 truncate">' + (s.username || '') + '</span>' +
+                '</span></button>';
+        });
+        if (!count) {
+            html = '<div class="px-4 py-3 text-sm text-gray-400 text-center">Không tìm thấy thành viên</div>';
+        }
+        dropdown.innerHTML = html;
+        dropdown.querySelectorAll('.assignee-option').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                selected.add(String(btn.getAttribute('data-id')));
+                searchInput.value = '';
+                renderTags();
+                renderDropdown('');
+                dropdown.classList.add('hidden');
+            });
+        });
+    }
+
+    searchInput.addEventListener('focus', function () {
+        renderDropdown(searchInput.value);
+        dropdown.classList.remove('hidden');
+    });
+    searchInput.addEventListener('input', function () {
+        renderDropdown(searchInput.value);
+        dropdown.classList.remove('hidden');
+    });
+    document.addEventListener('click', function (e) {
+        if (!document.getElementById('dept-assignee-picker').contains(e.target)) {
+            dropdown.classList.add('hidden');
+        }
+    });
+
+    renderTags();
+    {% if show_assign_modal %}
+    openModal();
+    {% endif %}
+})();
+</script>
+{% endif %}
+{% endblock %}

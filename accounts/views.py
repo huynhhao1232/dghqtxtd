@@ -7,22 +7,25 @@ from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Prefetch, Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 import json
 
 from .decorators import manager_required, redirect_by_role
 from .forms import (
     DepartmentForm,
-    GroupPostForm,
     LoginForm,
     ProfileUpdateForm,
     StaffCreateForm,
     StaffEditForm,
     StyledPasswordChangeForm,
 )
-from .models import Department, GroupPost, User
+from .models import Department, User
 from .vietnamese import sort_users_by_vietnamese_name, user_display_full_name
-from tasks.models import Task, TaskAssignment
+from tasks.forms import DepartmentTaskAssignForm
+from tasks.models import Task, TaskAssignment, TaskAttachment, TaskParticipation
+from tasks.views import _enrich_task_row, _task_display_status
 
 
 @require_http_methods(['GET', 'POST'])
@@ -325,13 +328,104 @@ def manager_staff_list(request):
     )
 
 
-# ───────────────────────── Department interaction space ─────────────────────────
+# ───────────────────────── Department task Workspace ─────────────────────────
+
+
+def _department_tasks_queryset(department):
+    """Công việc liên quan tổ: FK phòng ban, giao theo tổ, hoặc assignee là thành viên."""
+    return (
+        Task.objects.filter(
+            Q(primary_department=department)
+            | Q(coordinating_departments=department)
+            | Q(assignments__assignee_department=department)
+            | Q(assignments__assignee__my_departments=department)
+        )
+        .select_related(
+            'created_by',
+            'primary_department',
+            'primary_department__leader',
+        )
+        .prefetch_related(
+            'coordinating_departments',
+            Prefetch(
+                'assignments',
+                queryset=TaskAssignment.objects.select_related(
+                    'assignee',
+                    'assignee_department',
+                    'assignee_department__leader',
+                ),
+            ),
+            Prefetch(
+                'participations',
+                queryset=TaskParticipation.objects.select_related('user'),
+            ),
+        )
+        .distinct()
+        .order_by('-created_at')
+    )
+
+
+def _department_task_action(task, user):
+    """Nút hành động theo role: nghiệm thu (lãnh đạo/tổ) hoặc cập nhật tiến độ (assignee)."""
+    assignments = list(task.assignments.all())
+    my_asg = next((a for a in assignments if a.assignee_id == user.id), None)
+    pending = next(
+        (a for a in assignments if a.status == TaskAssignment.STATUS_PENDING),
+        None,
+    )
+
+    if user.is_director:
+        if pending:
+            return {
+                'label': 'Nghiệm thu / Chấm điểm',
+                'url': reverse('manager_review_task', args=[pending.pk]),
+                'kind': 'review',
+            }
+        return {
+            'label': 'Nghiệm thu / Chấm điểm',
+            'url': reverse('manager_task_detail', args=[task.pk]),
+            'kind': 'review',
+        }
+
+    if user.is_department:
+        target = pending or my_asg or (assignments[0] if assignments else None)
+        if target:
+            return {
+                'label': 'Nghiệm thu / Chấm điểm',
+                'url': reverse('staff_task_detail', args=[target.pk]),
+                'kind': 'review',
+            }
+        return None
+
+    if my_asg:
+        return {
+            'label': 'Cập nhật tiến độ',
+            'url': reverse('staff_task_detail', args=[my_asg.pk]),
+            'kind': 'progress',
+        }
+    return None
+
+
+def _department_task_assignees(task):
+    """Danh sách người nhận hiển thị (avatar + tên)."""
+    people = []
+    seen = set()
+    for asg in task.assignments.all():
+        if asg.assignee_id and asg.assignee_id not in seen:
+            seen.add(asg.assignee_id)
+            people.append(asg.assignee)
+        elif asg.assignee_department_id and asg.assignee_department.leader_id:
+            leader = asg.assignee_department.leader
+            if leader.pk not in seen:
+                seen.add(leader.pk)
+                people.append(leader)
+    return people
 
 
 @login_required
 @require_http_methods(['GET', 'POST'])
 def department_interaction(request, dept_id):
-    """Khu vực tương tác nhóm — chỉ thành viên / Trưởng tổ / Lãnh đạo."""
+    """Workspace nhiệm vụ nội bộ nhóm — chỉ thành viên / Trưởng tổ / Lãnh đạo."""
     department = get_object_or_404(
         Department.objects.select_related('leader').prefetch_related('members'),
         pk=dept_id,
@@ -339,57 +433,112 @@ def department_interaction(request, dept_id):
     if not department.user_can_access(request.user):
         raise PermissionDenied('Bạn không có quyền truy cập khu vực nhóm này.')
 
-    post_form = GroupPostForm()
+    can_assign = request.user.is_director or request.user.is_department
+    assign_form = DepartmentTaskAssignForm(
+        department=department,
+        user=request.user,
+    )
+    show_assign_modal = False
+
     if request.method == 'POST':
-        post_form = GroupPostForm(request.POST)
-        if post_form.is_valid():
-            post = post_form.save(commit=False)
-            post.department = department
-            post.author = request.user
-            post.save()
-            messages.success(request, 'Đã đăng tin lên bảng tin nhóm.')
-            return redirect('department_interaction', dept_id=department.pk)
-
-    posts = (
-        GroupPost.objects.filter(department=department)
-        .select_related('author')
-        .order_by('-created_at')[:50]
-    )
-    members = list(
-        department.members.filter(is_active=True).order_by('last_name', 'first_name')
-    )
-    # Đưa Trưởng tổ lên đầu danh sách
-    if department.leader_id:
-        members.sort(key=lambda u: (0 if u.pk == department.leader_id else 1, str(u)))
-
-    recent_tasks = (
-        Task.objects.filter(
-            Q(primary_department=department) | Q(coordinating_departments=department)
+        if not can_assign:
+            raise PermissionDenied('Chỉ Trưởng tổ / Lãnh đạo được giao việc nội bộ.')
+        assign_form = DepartmentTaskAssignForm(
+            request.POST,
+            request.FILES or None,
+            department=department,
+            user=request.user,
         )
-        .select_related('primary_department', 'primary_department__leader')
-        .prefetch_related('assignments', 'coordinating_departments')
-        .distinct()
-        .order_by('-created_at')[:5]
-    )
-    task_cards = []
-    for task in recent_tasks:
-        canonical = task.get_canonical_assignment()
-        status = canonical.status if canonical else TaskAssignment.STATUS_TODO
-        status_label = dict(TaskAssignment.STATUS_CHOICES).get(status, status)
-        task_cards.append({
-            'task': task,
-            'status': status,
-            'status_label': status_label,
+        if assign_form.is_valid():
+            task = assign_form.save(commit=False)
+            task.created_by = request.user
+            task.primary_department = department
+            task.save()
+            for uploaded in assign_form.cleaned_data.get('attachments') or []:
+                TaskAttachment.objects.create(
+                    task=task,
+                    file=uploaded,
+                    original_name=uploaded.name,
+                    file_size=uploaded.size,
+                )
+            assignees = assign_form.cleaned_data['assignees']
+            count = 0
+            for member in assignees:
+                _, created = TaskAssignment.objects.get_or_create(
+                    task=task,
+                    assignee=member,
+                )
+                if created:
+                    count += 1
+            messages.success(
+                request,
+                f'Đã giao việc nội bộ "{task.title}" cho {count} thành viên tổ.',
+            )
+            return redirect('department_interaction', dept_id=department.pk)
+        show_assign_modal = True
+        messages.error(request, 'Không thể giao việc. Vui lòng kiểm tra lại biểu mẫu.')
+
+    members_count = department.members.filter(is_active=True).count()
+    today = timezone.localdate()
+    tasks_qs = _department_tasks_queryset(department)
+    all_tasks = list(tasks_qs)
+
+    stats = {
+        'in_progress': 0,
+        'pending': 0,
+        'overdue': 0,
+    }
+    task_rows = []
+    for task in all_tasks:
+        st = _task_display_status(task)
+        if st in (
+            TaskAssignment.STATUS_TODO,
+            TaskAssignment.STATUS_IN_PROGRESS,
+            TaskAssignment.STATUS_REDO,
+        ):
+            stats['in_progress'] += 1
+        elif st == TaskAssignment.STATUS_PENDING:
+            stats['pending'] += 1
+        if task.deadline < today and st != TaskAssignment.STATUS_COMPLETED:
+            stats['overdue'] += 1
+
+        enriched = _enrich_task_row(task, today)
+        assignees = _department_task_assignees(task)
+        task_rows.append({
+            'task': enriched,
+            'assignees': assignees,
+            'primary_assignee': assignees[0] if assignees else None,
+            'action': _department_task_action(task, request.user),
+        })
+
+    member_options = []
+    for u in assign_form.fields['assignees'].queryset.prefetch_related('my_departments'):
+        member_options.append({
+            'id': u.id,
+            'name': u.get_full_name() or u.username,
+            'username': u.username,
+            'avatar': u.avatar_url,
+            'department': department.name,
         })
 
     return render(
         request,
-        'accounts/department_interaction.html',
+        'accounts/department_detail.html',
         {
             'department': department,
-            'posts': posts,
-            'post_form': post_form,
-            'members': members,
-            'task_cards': task_cards,
+            'members_count': members_count,
+            'stats': stats,
+            'task_rows': task_rows,
+            'can_assign': can_assign,
+            'assign_form': assign_form,
+            'show_assign_modal': show_assign_modal,
+            'member_options_json': json.dumps(member_options, ensure_ascii=False),
+            'selected_assignee_ids': json.dumps(
+                [str(x) for x in (
+                    request.POST.getlist('assignees') if request.method == 'POST' else []
+                )]
+            ),
+            'max_attachment_mb': TaskAttachment.MAX_SIZE_MB,
+            'max_attachment_count': TaskAttachment.MAX_COUNT,
         },
     )

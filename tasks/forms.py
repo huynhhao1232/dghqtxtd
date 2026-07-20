@@ -243,6 +243,107 @@ class TaskAssignForm(forms.ModelForm):
 TaskCreateForm = TaskAssignForm
 
 
+class DepartmentTaskAssignForm(forms.ModelForm):
+    """Giao việc nội bộ trong một Tổ/Nhóm — chỉ thành viên của tổ đó."""
+
+    assignees = forms.ModelMultipleChoiceField(
+        queryset=User.objects.none(),
+        required=True,
+        label='Người nhận',
+        widget=forms.MultipleHiddenInput,
+        error_messages={'required': 'Vui lòng chọn ít nhất một thành viên trong tổ.'},
+    )
+    attachments = MultipleFileField(
+        required=False,
+        label='File đính kèm',
+        widget=MultipleFileInput(
+            attrs={
+                'id': 'id_dept_attachments',
+                'class': 'hidden',
+                'multiple': True,
+            }
+        ),
+    )
+
+    class Meta:
+        model = Task
+        fields = (
+            'title',
+            'description',
+            'deadline',
+            'cycle',
+        )
+        widgets = {
+            'title': forms.TextInput(
+                attrs={
+                    'class': INPUT_CLASS,
+                    'placeholder': 'VD: Soạn biên bản họp tổ',
+                    'id': 'id_dept_title',
+                }
+            ),
+            'description': forms.Textarea(
+                attrs={
+                    'class': INPUT_CLASS,
+                    'rows': 3,
+                    'placeholder': 'Mô tả yêu cầu nội bộ...',
+                    'id': 'id_dept_description',
+                }
+            ),
+            'deadline': forms.DateInput(
+                attrs={
+                    'type': 'date',
+                    'class': INPUT_CLASS + ' pl-10',
+                    'id': 'id_dept_deadline',
+                }
+            ),
+            'cycle': forms.Select(attrs={'class': INPUT_CLASS, 'id': 'id_dept_cycle'}),
+        }
+
+    def __init__(self, *args, department=None, user=None, **kwargs):
+        self.department = department
+        self.user = user
+        super().__init__(*args, **kwargs)
+        member_qs = User.objects.none()
+        if department is not None:
+            member_qs = (
+                department.members.filter(is_active=True)
+                .exclude(role=User.ROLE_DIRECTOR)
+                .order_by('last_name', 'first_name', 'username')
+            )
+        self.fields['assignees'].queryset = member_qs
+
+    def clean_assignees(self):
+        assignees = self.cleaned_data.get('assignees')
+        if not assignees:
+            raise forms.ValidationError('Vui lòng chọn ít nhất một thành viên trong tổ.')
+        if self.department is not None:
+            member_ids = set(
+                self.department.members.filter(is_active=True).values_list('pk', flat=True)
+            )
+            invalid = [u for u in assignees if u.pk not in member_ids]
+            if invalid:
+                raise forms.ValidationError(
+                    'Chỉ được giao việc cho thành viên của tổ này.'
+                )
+        return assignees
+
+    def clean(self):
+        cleaned = super().clean()
+        files = cleaned.get('attachments') or []
+        if len(files) > TaskAttachment.MAX_COUNT:
+            raise forms.ValidationError(
+                f'Chỉ được đính kèm tối đa {TaskAttachment.MAX_COUNT} file.'
+            )
+        for f in files:
+            if f.size > TaskAttachment.MAX_SIZE_BYTES:
+                raise forms.ValidationError(
+                    f'File "{f.name}" vượt quá {TaskAttachment.MAX_SIZE_MB}MB '
+                    f'({f.size / (1024 * 1024):.1f}MB).'
+                )
+        cleaned['attachments'] = files
+        return cleaned
+
+
 class StaffTaskUpdateForm(forms.ModelForm):
     """Trưởng tổ Chủ trì / người ủy quyền / assignee sub-task: cập nhật tiến độ & minh chứng."""
 
