@@ -78,13 +78,29 @@ class PeriodStats:
 
 
 def _agg_from_qs(qs, result_field='evaluation_result', penalty_field='penalty_score'):
-    row = qs.aggregate(
-        dat_count=Count('id', filter=Q(**{result_field: EvaluationResult.DAT})),
-        penalty_total=Sum(penalty_field),
+    """
+    Tổng trừ = penalty_score (đánh giá) + overdue_penalty (gia hạn quá hạn).
+    """
+    overdue_field = (
+        'overdue_penalty'
+        if penalty_field == 'penalty_score'
+        else penalty_field.replace('penalty_score', 'overdue_penalty')
+        if 'penalty_score' in penalty_field
+        else None
     )
+    aggregates = {
+        'dat_count': Count('id', filter=Q(**{result_field: EvaluationResult.DAT})),
+        'penalty_total': Sum(penalty_field),
+    }
+    if overdue_field:
+        aggregates['overdue_total'] = Sum(overdue_field)
+    row = qs.aggregate(**aggregates)
+    penalty = int(row['penalty_total'] or 0)
+    if overdue_field:
+        penalty += int(row.get('overdue_total') or 0)
     return PeriodStats(
         dat_count=row['dat_count'] or 0,
-        penalty_total=int(row['penalty_total'] or 0),
+        penalty_total=penalty,
     )
 
 

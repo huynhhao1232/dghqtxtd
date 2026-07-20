@@ -20,6 +20,8 @@ class TaskAssignmentInline(admin.TabularInline):
         'status',
         'evaluation_result',
         'penalty_score',
+        'overdue_penalty',
+        'extended_with_penalty',
     )
 
 
@@ -33,7 +35,7 @@ class TaskParticipationInline(admin.TabularInline):
     model = TaskParticipation
     extra = 0
     autocomplete_fields = ('user', 'department')
-    fields = ('user', 'department', 'role', 'evaluation', 'penalty_score')
+    fields = ('user', 'department', 'role', 'evaluation', 'penalty_score', 'overdue_penalty')
 
 
 class CoordinatingProofInline(admin.TabularInline):
@@ -94,6 +96,8 @@ class TaskAssignmentAdmin(admin.ModelAdmin):
         'status',
         'evaluation_result',
         'penalty_score',
+        'overdue_penalty',
+        'extended_with_penalty',
         'submitted_at',
         'reviewed_at',
     )
@@ -117,6 +121,7 @@ class TaskParticipationAdmin(admin.ModelAdmin):
         'role',
         'evaluation',
         'penalty_score',
+        'overdue_penalty',
         'added_at',
     )
     list_filter = ('role', 'evaluation')

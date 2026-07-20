@@ -1995,3 +1995,158 @@ class HandoverAndLeaveTestCase(TestCase):
         qs = User.assignable_queryset_for(self.manager)
         self.assertNotIn(self.on_leave, qs)
         self.assertIn(self.member1, qs)
+
+
+class OverdueExtendPenaltyTestCase(TestCase):
+    """Người giao: gia hạn / gia hạn kèm −1 khi quá hạn."""
+
+    def setUp(self):
+        self.director = User.objects.create_user(
+            username='dir_ext',
+            password='x',
+            role=User.ROLE_DIRECTOR,
+            first_name='BG',
+            last_name='Đốc',
+        )
+        self.assigner = User.objects.create_user(
+            username='assigner_ext',
+            password='x',
+            role=User.ROLE_DEPARTMENT,
+            first_name='Người',
+            last_name='Giao',
+        )
+        self.staff_a = User.objects.create_user(
+            username='staff_a_ext',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='A',
+            last_name='Nhận',
+        )
+        self.staff_b = User.objects.create_user(
+            username='staff_b_ext',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='B',
+            last_name='Nhận',
+        )
+        self.dept = Department.objects.create(name='Tổ Ext', leader=self.assigner)
+        self.dept.members.add(self.assigner, self.staff_a, self.staff_b)
+        self.today = timezone.localdate()
+        self.client = Client()
+
+    def _overdue_task(self, title='Việc quá hạn', assignee=None):
+        task = Task.objects.create(
+            title=title,
+            created_by=self.assigner,
+            deadline=self.today - timedelta(days=2),
+            cycle=Task.CYCLE_MONTH,
+        )
+        asg = TaskAssignment.objects.create(
+            task=task,
+            assignee=assignee or self.staff_a,
+            status=TaskAssignment.STATUS_IN_PROGRESS,
+        )
+        return task, asg
+
+    def test_extend_without_penalty_sets_deadline_and_notifies(self):
+        task, asg = self._overdue_task()
+        new_dl = self.today + timedelta(days=5)
+        self.client.force_login(self.assigner)
+        resp = self.client.post(
+            reverse('manager_task_extend', kwargs={'pk': task.pk}),
+            {'new_deadline': new_dl.isoformat(), 'with_penalty': '0'},
+        )
+        self.assertEqual(resp.status_code, 302)
+        task.refresh_from_db()
+        asg.refresh_from_db()
+        self.assertEqual(task.deadline, new_dl)
+        self.assertFalse(asg.extended_with_penalty)
+        self.assertEqual(asg.overdue_penalty, 0)
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.staff_a,
+                related_task=task,
+                message__contains='đã được gia hạn',
+            ).exists()
+        )
+        self.assertFalse(
+            Notification.objects.filter(
+                recipient=self.staff_a,
+                related_task=task,
+                message__contains='trừ −1',
+            ).exists()
+        )
+
+    def test_extend_with_penalty_records_flag_and_notifies(self):
+        task, asg = self._overdue_task()
+        done = TaskAssignment.objects.create(
+            task=task,
+            assignee=self.staff_b,
+            status=TaskAssignment.STATUS_COMPLETED,
+        )
+        new_dl = self.today + timedelta(days=7)
+        self.client.force_login(self.assigner)
+        resp = self.client.post(
+            reverse('manager_task_extend', kwargs={'pk': task.pk}),
+            {'new_deadline': new_dl.isoformat(), 'with_penalty': '1'},
+        )
+        self.assertEqual(resp.status_code, 302)
+        asg.refresh_from_db()
+        done.refresh_from_db()
+        self.assertTrue(asg.extended_with_penalty)
+        self.assertEqual(asg.overdue_penalty, 1)
+        self.assertFalse(done.extended_with_penalty)
+        self.assertEqual(done.overdue_penalty, 0)
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.staff_a,
+                related_task=task,
+                message__contains='trừ −1',
+            ).exists()
+        )
+
+    def test_review_does_not_clear_overdue_penalty(self):
+        task, asg = self._overdue_task()
+        asg.apply_overdue_extend_penalty()
+        asg.save()
+        asg.apply_review(EvaluationResult.DAT, 'OK')
+        asg.save()
+        asg.refresh_from_db()
+        self.assertEqual(asg.evaluation_result, EvaluationResult.DAT)
+        self.assertEqual(asg.penalty_score, 0)
+        self.assertEqual(asg.overdue_penalty, 1)
+        self.assertEqual(asg.total_penalty, 1)
+        stats = stats_for_person(self.staff_a)
+        self.assertGreaterEqual(stats.penalty_total, 1)
+
+    def test_staff_cannot_extend(self):
+        task, _ = self._overdue_task()
+        self.client.force_login(self.staff_a)
+        resp = self.client.post(
+            reverse('manager_task_extend', kwargs={'pk': task.pk}),
+            {
+                'new_deadline': (self.today + timedelta(days=3)).isoformat(),
+                'with_penalty': '1',
+            },
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_legacy_days_extend_still_works(self):
+        task, _ = self._overdue_task()
+        old = task.deadline
+        self.client.force_login(self.director)
+        resp = self.client.post(
+            reverse('manager_task_extend', kwargs={'pk': task.pk}),
+            {'days': '3'},
+        )
+        self.assertEqual(resp.status_code, 302)
+        task.refresh_from_db()
+        self.assertEqual(task.deadline, old + timedelta(days=3))
+
+    def test_manage_tasks_shows_two_overdue_options(self):
+        task, _ = self._overdue_task()
+        self.client.force_login(self.assigner)
+        resp = self.client.get(reverse('manager_manage_tasks'))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Gia hạn (−1 điểm)')
+        self.assertContains(resp, 'btn-extend')

@@ -144,6 +144,11 @@
                             {{ person.grade }}
                         </span>
                         {% endif %}
+                        {% if person.overdue_penalty %}
+                        <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-medium bg-rose-50 text-rose-700 ring-1 ring-rose-600/15">
+                            Gia hạn −{{ person.overdue_penalty }}
+                        </span>
+                        {% endif %}
                         <a href="{{ person.detail_url }}"
                            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 transition">
                             <i class="fas fa-external-link-alt"></i> Xem bài
@@ -251,11 +256,18 @@
                             {% else %}
                             <p class="font-semibold text-amber-600">Yêu cầu làm lại</p>
                             {% endif %}
+                            {% if a.overdue_penalty %}
+                            <p class="text-[11px] text-rose-600 mt-0.5 font-medium">Gia hạn quá hạn: −{{ a.overdue_penalty }}</p>
+                            {% endif %}
                             {% if a.manager_comment %}
                             <p class="text-[11px] text-gray-400 mt-0.5 line-clamp-2">{{ a.manager_comment }}</p>
                             {% endif %}
                             {% else %}
+                            {% if a.overdue_penalty %}
+                            <p class="font-semibold text-rose-600">Gia hạn quá hạn: −{{ a.overdue_penalty }}</p>
+                            {% else %}
                             <span class="text-gray-400">—</span>
+                            {% endif %}
                             {% endif %}
                         </td>
                         <td class="px-5 py-4 text-right">

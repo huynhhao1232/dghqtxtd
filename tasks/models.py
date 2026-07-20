@@ -557,6 +557,16 @@ class TaskParticipation(models.Model):
         verbose_name='Điểm trừ thi đua',
         help_text='0 hoặc 1 — tự động ghi 1 khi chọn mức trừ điểm.',
     )
+    extended_with_penalty = models.BooleanField(
+        default=False,
+        verbose_name='Đã gia hạn kèm trừ điểm',
+        help_text='True khi người giao gia hạn quá hạn kèm trừ −1.',
+    )
+    overdue_penalty = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name='Điểm trừ do gia hạn quá hạn',
+        help_text='0 hoặc 1 — ghi khi gia hạn kèm trừ điểm; không bị ghi đè khi đánh giá.',
+    )
     added_at = models.DateTimeField(auto_now_add=True)
     evaluated_at = models.DateTimeField(null=True, blank=True)
     handover_status = models.CharField(
@@ -585,6 +595,10 @@ class TaskParticipation(models.Model):
                 condition=models.Q(penalty_score__in=[0, 1]),
                 name='taskparticipation_penalty_0_or_1',
             ),
+            models.CheckConstraint(
+                condition=models.Q(overdue_penalty__in=[0, 1]),
+                name='taskparticipation_overdue_penalty_0_or_1',
+            ),
         ]
 
     def __str__(self):
@@ -605,6 +619,15 @@ class TaskParticipation(models.Model):
         self.evaluation = result
         self.penalty_score = 1 if result == EvaluationResult.TRE_BI_TRU_DIEM else 0
         self.evaluated_at = timezone.now()
+
+    def apply_overdue_extend_penalty(self):
+        """Ghi −1 do gia hạn quá hạn (idempotent — không cộng dồn)."""
+        self.extended_with_penalty = True
+        self.overdue_penalty = 1
+
+    @property
+    def total_penalty(self):
+        return int(self.penalty_score or 0) + int(self.overdue_penalty or 0)
 
 
 class CoordinatingProof(models.Model):
@@ -746,6 +769,16 @@ class TaskAssignment(models.Model):
         verbose_name='Điểm trừ thi đua',
         help_text='0 hoặc 1 — tự động ghi 1 khi chọn mức trừ điểm.',
     )
+    extended_with_penalty = models.BooleanField(
+        default=False,
+        verbose_name='Đã gia hạn kèm trừ điểm',
+        help_text='True khi người giao gia hạn quá hạn kèm trừ −1.',
+    )
+    overdue_penalty = models.PositiveSmallIntegerField(
+        default=0,
+        verbose_name='Điểm trừ do gia hạn quá hạn',
+        help_text='0 hoặc 1 — ghi khi gia hạn kèm trừ điểm; không bị ghi đè khi đánh giá.',
+    )
     manager_comment = models.TextField(blank=True, verbose_name='Nhận xét lãnh đạo')
     submitted_at = models.DateTimeField(null=True, blank=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
@@ -776,6 +809,10 @@ class TaskAssignment(models.Model):
             models.CheckConstraint(
                 condition=models.Q(penalty_score__in=[0, 1]),
                 name='taskassignment_penalty_0_or_1',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(overdue_penalty__in=[0, 1]),
+                name='taskassignment_overdue_penalty_0_or_1',
             ),
         ]
 
@@ -840,10 +877,21 @@ class TaskAssignment(models.Model):
             return '—'
         return EvaluationResult.LABELS.get(self.evaluation_result, self.evaluation_result)
 
+    @property
+    def total_penalty(self):
+        """Tổng điểm trừ: đánh giá + gia hạn quá hạn (mỗi phần tối đa 1)."""
+        return int(self.penalty_score or 0) + int(self.overdue_penalty or 0)
+
+    def apply_overdue_extend_penalty(self):
+        """Ghi −1 do gia hạn quá hạn (idempotent — không cộng dồn)."""
+        self.extended_with_penalty = True
+        self.overdue_penalty = 1
+
     def apply_review(self, evaluation_result, comment=''):
         """
         Ghi nhận kết quả đánh giá 3 mức (ghi đè kết quả cũ nếu duyệt lại).
         DAT → hoàn thành; hai mức chưa đạt → yêu cầu làm lại; mức đỏ → penalty=1.
+        overdue_penalty (gia hạn) không bị ghi đè.
         """
         if evaluation_result not in EvaluationResult.LABELS:
             raise ValidationError('Kết quả đánh giá không hợp lệ.')

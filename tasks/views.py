@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from io import BytesIO
 
 from django.contrib import messages
@@ -1623,6 +1623,7 @@ def _person_leaf_from_assignment(assignment, task, today):
         'task': task,
         'assignment': assignment,
         'grade': grade,
+        'overdue_penalty': int(assignment.overdue_penalty or 0),
         'detail_url': reverse('staff_task_detail', kwargs={'pk': assignment.pk}),
         'review_url': (
             reverse('manager_assignment_review', kwargs={
@@ -1664,6 +1665,7 @@ def _person_leaf_from_participation(part, task, today):
         'task': task,
         'assignment': None,
         'grade': grade,
+        'overdue_penalty': int(part.overdue_penalty or 0),
         'detail_url': reverse('manager_task_detail', kwargs={'pk': task.pk}),
         'review_url': None,
     }
@@ -2420,33 +2422,168 @@ def manager_task_edit(request, pk):
     return redirect(f"{reverse('manager_manage_tasks')}?edit={pk}")
 
 
+def _parse_extend_deadline(raw):
+    """Parse YYYY-MM-DD từ form; None nếu trống/không hợp lệ."""
+    raw = (raw or '').strip()
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw, '%Y-%m-%d').date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _truthy_post(value):
+    return str(value or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _apply_overdue_penalties_for_tasks(tasks):
+    """
+    Áp −1 gia hạn quá hạn cho mọi assignment ACTIVE chưa hoàn thành
+    và participation ACTIVE chưa Đạt trên các task được gia hạn.
+    (Nhóm batch: áp dụng cho tất cả thành viên còn dang dở.)
+    """
+    penalized = 0
+    for task in tasks:
+        assignments = task.assignments.filter(
+            handover_status=TaskAssignment.HANDOVER_ACTIVE,
+        ).exclude(status=TaskAssignment.STATUS_COMPLETED)
+        for asg in assignments:
+            if asg.overdue_penalty:
+                continue
+            asg.apply_overdue_extend_penalty()
+            asg.save(
+                update_fields=[
+                    'extended_with_penalty',
+                    'overdue_penalty',
+                    'updated_at',
+                ]
+            )
+            penalized += 1
+        parts = task.participations.filter(
+            handover_status=TaskParticipation.HANDOVER_ACTIVE,
+        ).exclude(evaluation=EvaluationResult.DAT)
+        for part in parts:
+            if part.overdue_penalty:
+                continue
+            part.apply_overdue_extend_penalty()
+            part.save(
+                update_fields=['extended_with_penalty', 'overdue_penalty']
+            )
+            penalized += 1
+    return penalized
+
+
+def _notify_extend_assignees(tasks, new_deadline, with_penalty):
+    """Thông báo người nhận về gia hạn (+ ghi chú trừ điểm nếu có)."""
+    deadline_txt = new_deadline.strftime('%d/%m/%Y')
+    seen = set()
+    for task in tasks:
+        if with_penalty:
+            msg = (
+                f'Công việc "{task.title}" đã được gia hạn đến {deadline_txt} '
+                f'kèm trừ −1 điểm thi đua do quá hạn.'
+            )
+        else:
+            msg = (
+                f'Công việc "{task.title}" đã được gia hạn đến {deadline_txt}.'
+            )
+        recipients = []
+        for asg in task.assignments.filter(
+            handover_status=TaskAssignment.HANDOVER_ACTIVE,
+        ).exclude(status=TaskAssignment.STATUS_COMPLETED):
+            user = asg.acting_user
+            if user and user.id not in seen:
+                recipients.append(user)
+                seen.add(user.id)
+        for part in task.participations.filter(
+            handover_status=TaskParticipation.HANDOVER_ACTIVE,
+        ).select_related('user'):
+            if part.user_id and part.user_id not in seen:
+                recipients.append(part.user)
+                seen.add(part.user_id)
+        for user in recipients:
+            Notification.objects.create(
+                recipient=user,
+                message=msg,
+                related_task=task,
+            )
+
+
 @assigner_required
 @require_POST
 def manager_task_extend(request, pk):
+    """
+    Gia hạn hạn chót (người giao / BGH).
+
+    POST:
+    - new_deadline (YYYY-MM-DD) — ưu tiên; hoặc days (3|5) như trước
+    - with_penalty=true — kèm trừ −1 cho assignee ACTIVE chưa hoàn thành
+    """
     task = _get_managed_task_or_403(request.user, pk)
-    try:
-        days = int(request.POST.get('days', 3))
-    except (TypeError, ValueError):
-        days = 3
-    if days not in (3, 5):
-        days = 3
+    with_penalty = _truthy_post(request.POST.get('with_penalty'))
+    new_deadline = _parse_extend_deadline(request.POST.get('new_deadline'))
+    days = None
+    use_absolute = new_deadline is not None
+    if not use_absolute:
+        try:
+            days = int(request.POST.get('days', 3))
+        except (TypeError, ValueError):
+            days = 3
+        if days not in (3, 5):
+            days = 3
+        new_deadline = task.deadline + timedelta(days=days)
+    today = timezone.localdate()
+    if use_absolute and new_deadline <= today:
+        messages.error(
+            request,
+            'Hạn mới phải sau ngày hôm nay. Vui lòng chọn lại thời hạn.',
+        )
+        return redirect('manager_manage_tasks')
+    if use_absolute and new_deadline < task.deadline:
+        messages.error(
+            request,
+            'Hạn mới không được sớm hơn hạn hiện tại.',
+        )
+        return redirect('manager_manage_tasks')
+
     siblings = _managed_batch_siblings(request.user, task)
+    penalized = 0
     with transaction.atomic():
         for sibling in siblings:
-            sibling.deadline = sibling.deadline + timedelta(days=days)
+            if use_absolute:
+                sibling.deadline = new_deadline
+            else:
+                sibling.deadline = sibling.deadline + timedelta(days=days)
             sibling.save(update_fields=['deadline', 'updated_at'])
+        if with_penalty:
+            penalized = _apply_overdue_penalties_for_tasks(siblings)
+        _notify_extend_assignees(siblings, new_deadline, with_penalty)
+
     task.refresh_from_db(fields=['deadline'])
     label = task.batch_display_title if len(siblings) > 1 else task.title
+    penalty_note = (
+        f' Đã ghi trừ −1 cho {penalized} người/phân công chưa hoàn thành.'
+        if with_penalty
+        else ''
+    )
+    if days is not None:
+        span = f'thêm {days} ngày '
+    else:
+        span = ''
     if len(siblings) > 1:
         messages.success(
             request,
-            f'Đã gia hạn nhóm việc "{label}" thêm {days} ngày '
-            f'({len(siblings)} nhiệm vụ; hạn mới: {task.deadline.strftime("%d/%m/%Y")}).',
+            f'Đã gia hạn nhóm việc "{label}" {span}'
+            f'({len(siblings)} nhiệm vụ; hạn mới: {task.deadline.strftime("%d/%m/%Y")}).'
+            f'{penalty_note}',
         )
     else:
         messages.success(
             request,
-            f'Đã gia hạn "{label}" thêm {days} ngày (hạn mới: {task.deadline.strftime("%d/%m/%Y")}).',
+            f'Đã gia hạn "{label}" {span}'
+            f'(hạn mới: {task.deadline.strftime("%d/%m/%Y")}).'
+            f'{penalty_note}',
         )
     wants_json = (
         request.headers.get('X-Requested-With') == 'XMLHttpRequest'
@@ -2458,6 +2595,8 @@ def manager_task_extend(request, pk):
             'deadline': task.deadline.isoformat(),
             'deadline_display': task.deadline.strftime('%d/%m/%Y'),
             'days': days,
+            'with_penalty': with_penalty,
+            'penalized_count': penalized,
             'batch_count': len(siblings),
         })
     return redirect('manager_manage_tasks')
@@ -3091,6 +3230,7 @@ def task_detail_api(request, pk):
         else '—'
     )
     score = review_asg.penalty_score if review_asg.evaluation_result else None
+    overdue_penalty = int(review_asg.overdue_penalty or 0)
     comment = review_asg.manager_comment or ''
 
     return JsonResponse({
@@ -3104,6 +3244,9 @@ def task_detail_api(request, pk):
         'status_display': STATUS_LABELS.get(display, display),
         'grade': grade,
         'score': score,
+        'overdue_penalty': overdue_penalty,
+        'extended_with_penalty': bool(review_asg.extended_with_penalty),
+        'total_penalty': review_asg.total_penalty,
         'comment': comment,
         'proofs': _collect_task_proofs(task),
         'is_batch': False,

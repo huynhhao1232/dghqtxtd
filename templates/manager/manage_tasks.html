@@ -185,6 +185,24 @@
                                                 data-deadline="{{ task.deadline|date:'Y-m-d' }}">
                                             <i class="fas fa-pen w-4 text-gray-400"></i> Sửa
                                         </button>
+                                        {% if task.row_is_overdue %}
+                                        <button type="button"
+                                                class="btn-extend w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                                data-id="{{ task.pk }}"
+                                                data-title="{{ task.title|escape }}"
+                                                data-deadline="{{ task.deadline|date:'Y-m-d' }}"
+                                                data-with-penalty="0">
+                                            <i class="fas fa-calendar-plus w-4 text-gray-400"></i> Gia hạn
+                                        </button>
+                                        <button type="button"
+                                                class="btn-extend w-full text-left px-3 py-2 text-sm text-rose-700 hover:bg-rose-50"
+                                                data-id="{{ task.pk }}"
+                                                data-title="{{ task.title|escape }}"
+                                                data-deadline="{{ task.deadline|date:'Y-m-d' }}"
+                                                data-with-penalty="1">
+                                            <i class="fas fa-calendar-minus w-4 text-rose-400"></i> Gia hạn (−1 điểm)
+                                        </button>
+                                        {% else %}
                                         <form method="post" action="{% url 'manager_task_extend' task.pk %}">
                                             {% csrf_token %}
                                             <input type="hidden" name="days" value="3">
@@ -199,6 +217,7 @@
                                                 <i class="fas fa-calendar-plus w-4 text-gray-400"></i> Gia hạn +5 ngày
                                             </button>
                                         </form>
+                                        {% endif %}
                                         <div class="border-t border-gray-100 my-1"></div>
                                         <button type="button"
                                                 class="btn-delete w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50"
@@ -297,6 +316,28 @@
                                             <i class="fas fa-pen w-4 text-gray-400"></i>
                                             {% if node.is_batch_group %}Sửa nhóm việc{% else %}Sửa{% endif %}
                                         </button>
+                                        {% if node.row_is_overdue %}
+                                        <button type="button"
+                                                class="btn-extend w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                                data-id="{{ node.task.pk }}"
+                                                data-title="{{ node.title|escape }}"
+                                                data-deadline="{{ node.deadline|date:'Y-m-d' }}"
+                                                data-with-penalty="0"
+                                                data-batch="{% if node.is_batch_group %}1{% else %}0{% endif %}">
+                                            <i class="fas fa-calendar-plus w-4 text-gray-400"></i>
+                                            {% if node.is_batch_group %}Gia hạn nhóm{% else %}Gia hạn{% endif %}
+                                        </button>
+                                        <button type="button"
+                                                class="btn-extend w-full text-left px-3 py-2 text-sm text-rose-700 hover:bg-rose-50"
+                                                data-id="{{ node.task.pk }}"
+                                                data-title="{{ node.title|escape }}"
+                                                data-deadline="{{ node.deadline|date:'Y-m-d' }}"
+                                                data-with-penalty="1"
+                                                data-batch="{% if node.is_batch_group %}1{% else %}0{% endif %}">
+                                            <i class="fas fa-calendar-minus w-4 text-rose-400"></i>
+                                            {% if node.is_batch_group %}Gia hạn nhóm (−1 điểm){% else %}Gia hạn (−1 điểm){% endif %}
+                                        </button>
+                                        {% else %}
                                         <form method="post" action="{% url 'manager_task_extend' node.task.pk %}">
                                             {% csrf_token %}
                                             <input type="hidden" name="days" value="3">
@@ -313,6 +354,7 @@
                                                 {% if node.is_batch_group %}Gia hạn nhóm +5 ngày{% else %}Gia hạn +5 ngày{% endif %}
                                             </button>
                                         </form>
+                                        {% endif %}
                                         <div class="border-t border-gray-100 my-1"></div>
                                         <button type="button"
                                                 class="btn-delete w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50"
@@ -398,6 +440,46 @@
                 <button type="submit"
                         class="px-5 py-2.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition">
                     <i class="fas fa-save mr-1.5"></i> Lưu thay đổi
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# ── Modal: Gia hạn (quá hạn) ── #}
+<div id="extend-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/40" id="extend-modal-backdrop"></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+            <h3 id="extend-modal-title" class="text-lg font-semibold text-gray-900">Gia hạn công việc</h3>
+            <button type="button" id="extend-modal-close" class="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <form method="post" id="extend-form" action="" class="p-6 space-y-4">
+            {% csrf_token %}
+            <input type="hidden" name="with_penalty" id="extend-with-penalty" value="0">
+            <p class="text-sm text-gray-600">
+                <span id="extend-task-title" class="font-semibold text-gray-800"></span>
+            </p>
+            <p id="extend-penalty-hint" class="hidden text-sm text-rose-700 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2">
+                Sẽ ghi trừ <strong>−1 điểm thi đua</strong> cho tất cả người nhận ACTIVE còn chưa hoàn thành
+                (nhóm giao đồng loạt: áp dụng từng thành viên chưa xong).
+            </p>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">Hạn mới *</label>
+                <input type="date" name="new_deadline" id="extend-deadline" required
+                       class="w-full px-4 py-2.5 border border-gray-300 rounded-xl bg-white hover:border-blue-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition">
+                <p class="text-xs text-gray-400 mt-1">Hạn hiện tại: <span id="extend-current-deadline">—</span></p>
+            </div>
+            <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                <button type="button" id="extend-cancel"
+                        class="px-5 py-2.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition">
+                    Hủy
+                </button>
+                <button type="submit" id="extend-submit"
+                        class="px-5 py-2.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition">
+                    Xác nhận gia hạn
                 </button>
             </div>
         </form>
@@ -527,6 +609,76 @@
     ['delete-cancel', 'delete-modal-backdrop'].forEach(function (id) {
         var el = document.getElementById(id);
         if (el) el.addEventListener('click', closeDelete);
+    });
+
+    var extendModal = document.getElementById('extend-modal');
+    var extendForm = document.getElementById('extend-form');
+    var extendUrlTpl = "{% url 'manager_task_extend' 0 %}".replace('/0/', '/__ID__/');
+
+    function addDaysYmd(ymd, days) {
+        if (!ymd) return '';
+        var parts = ymd.split('-');
+        var d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        d.setDate(d.getDate() + days);
+        var mm = String(d.getMonth() + 1).padStart(2, '0');
+        var dd = String(d.getDate()).padStart(2, '0');
+        return d.getFullYear() + '-' + mm + '-' + dd;
+    }
+    function formatVi(ymd) {
+        if (!ymd) return '—';
+        var p = ymd.split('-');
+        return p[2] + '/' + p[1] + '/' + p[0];
+    }
+    function openExtend(data) {
+        var withPenalty = data.withPenalty === '1' || data.withPenalty === 1 || data.withPenalty === true;
+        document.getElementById('extend-task-title').textContent = data.title || '';
+        document.getElementById('extend-current-deadline').textContent = formatVi(data.deadline);
+        document.getElementById('extend-deadline').value = addDaysYmd(data.deadline, 3);
+        document.getElementById('extend-deadline').min = addDaysYmd(data.deadline, 1);
+        document.getElementById('extend-with-penalty').value = withPenalty ? '1' : '0';
+        document.getElementById('extend-modal-title').textContent = withPenalty
+            ? 'Gia hạn và trừ −1 điểm'
+            : 'Gia hạn công việc';
+        var hint = document.getElementById('extend-penalty-hint');
+        if (withPenalty) hint.classList.remove('hidden');
+        else hint.classList.add('hidden');
+        var submit = document.getElementById('extend-submit');
+        if (withPenalty) {
+            submit.className = 'px-5 py-2.5 rounded-lg text-sm font-medium bg-rose-600 text-white hover:bg-rose-700 shadow-sm transition';
+            submit.textContent = 'Gia hạn (−1 điểm)';
+        } else {
+            submit.className = 'px-5 py-2.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 shadow-sm transition';
+            submit.textContent = 'Xác nhận gia hạn';
+        }
+        extendForm.action = extendUrlTpl.replace('__ID__', data.id);
+        extendModal.classList.remove('hidden');
+        extendModal.classList.add('flex');
+    }
+    function closeExtend() {
+        extendModal.classList.add('hidden');
+        extendModal.classList.remove('flex');
+    }
+    document.querySelectorAll('.btn-extend').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            closeAllMenus();
+            openExtend({
+                id: btn.getAttribute('data-id'),
+                title: btn.getAttribute('data-title'),
+                deadline: btn.getAttribute('data-deadline'),
+                withPenalty: btn.getAttribute('data-with-penalty'),
+            });
+        });
+    });
+    ['extend-cancel', 'extend-modal-close', 'extend-modal-backdrop'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) el.addEventListener('click', closeExtend);
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+            closeExtend();
+            closeDelete();
+            closeEdit();
+        }
     });
 })();
 </script>
