@@ -1391,8 +1391,9 @@ def _enrich_task_row(task, today):
 
 def _manager_tasks_queryset(user=None):
     """
-    Task gốc (không gồm sub-task). Prefetch để tính badge & tiến độ.
-    RBAC: director → tất cả; department → tạo bởi họ hoặc được giao.
+    Task gốc (không gồm sub-task) mà user đã giao đi (created_by).
+    Dùng cho trang "Công việc đã giao" — chỉ việc mình phân công, kể cả BGH.
+    Việc được giao tới xem ở "Việc của tôi" / staff list.
     """
     qs = (
         Task.objects.filter(parent_task__isnull=True)
@@ -1414,28 +1415,23 @@ def _manager_tasks_queryset(user=None):
         )
         .annotate(assignment_count=Count('assignments', distinct=True))
     )
-    if user is None or getattr(user, 'is_director', False) or getattr(user, 'is_manager', False):
+    if user is None:
         return qs
-    if getattr(user, 'is_department', False):
-        return qs.filter(
-            Q(created_by=user)
-            | Q(assignments__assignee=user)
-            | Q(assignments__assignee_department__leader=user)
-        ).distinct()
-    return qs.filter(
-        Q(assignments__assignee=user)
-        | Q(assignments__assignee_department__leader=user)
-    ).distinct()
+    return qs.filter(created_by=user)
 
 
 def _user_can_administer_managed_task(user, task):
-    """Director: mọi task gốc. Tổ chuyên môn: chỉ task trong phạm vi queryset của họ."""
+    """
+    Người tạo luôn quản lý được task mình giao.
+    BGH (director/manager) giữ oversight toàn trường (chi tiết/sửa qua URL);
+    danh sách "đã giao" vẫn chỉ hiện việc mình tạo.
+    """
     if not user or not getattr(user, 'is_authenticated', False):
         return False
     if getattr(user, 'is_director', False) or getattr(user, 'is_manager', False):
         return True
-    if getattr(user, 'is_department', False):
-        return _manager_tasks_queryset(user).filter(pk=task.pk).exists()
+    if getattr(user, 'is_department', False) and task.created_by_id == user.id:
+        return True
     return False
 
 

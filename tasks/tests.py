@@ -1080,6 +1080,14 @@ class RoleBasedAccessControlTestCase(TestCase):
             cycle=Task.CYCLE_MONTH,
         )
         TaskAssignment.objects.create(task=others, assignee=self.other_staff)
+        # Việc BGH giao cho tổ trưởng: hiện ở "Việc của tôi", không vào "đã giao".
+        inbound = Task.objects.create(
+            title='BGH giao cho tổ',
+            created_by=self.director,
+            deadline=self.today + timedelta(days=3),
+            cycle=Task.CYCLE_MONTH,
+        )
+        TaskAssignment.objects.create(task=inbound, assignee=self.dept_user)
 
         self.client.force_login(self.dept_user)
         resp = self.client.get(reverse('manager_manage_tasks'))
@@ -1087,11 +1095,18 @@ class RoleBasedAccessControlTestCase(TestCase):
         self.assertContains(resp, 'Tổ đã giao')
         self.assertNotContains(resp, 'BGH đã giao')
         self.assertContains(resp, 'Công việc đã giao')
+        self.assertContains(resp, 'Chỉ các việc bạn đã phân công')
+        # Chỉ việc mình tạo; việc BGH giao tới không vào danh sách (có thể hiện ở thông báo).
+        listed_titles = {t.title for t in resp.context['tasks']}
+        self.assertEqual(listed_titles, {'Tổ đã giao'})
+        self.assertEqual(resp.context['stats']['total'], 1)
 
         detail = self.client.get(reverse('manager_task_detail', args=[mine.pk]))
         self.assertEqual(detail.status_code, 200)
         forbidden = self.client.get(reverse('manager_task_detail', args=[others.pk]))
         self.assertEqual(forbidden.status_code, 403)
+        inbound_forbidden = self.client.get(reverse('manager_task_detail', args=[inbound.pk]))
+        self.assertEqual(inbound_forbidden.status_code, 403)
 
     def test_staff_cannot_access_manage_tasks(self):
         self.client.force_login(self.staff_user)
@@ -1117,10 +1132,33 @@ class RoleBasedAccessControlTestCase(TestCase):
         )
         TaskAssignment.objects.create(task=others, assignee=self.other_staff)
 
+        # "đã giao" = chỉ việc mình tạo (kể cả BGH).
         director_titles = set(_manager_tasks_queryset(self.director).values_list('title', flat=True))
-        self.assertIn('Của tổ', director_titles)
+        self.assertNotIn('Của tổ', director_titles)
         self.assertIn('Của BGH', director_titles)
 
+        dept_titles = set(_manager_tasks_queryset(self.dept_user).values_list('title', flat=True))
+        self.assertIn('Của tổ', dept_titles)
+        self.assertNotIn('Của BGH', dept_titles)
+
+        dept2 = User.objects.create_user(
+            username='dept2_rbac',
+            password='x',
+            role=User.ROLE_DEPARTMENT,
+        )
+        other_dept_task = Task.objects.create(
+            title='Của tổ khác',
+            created_by=dept2,
+            deadline=self.today + timedelta(days=3),
+            cycle=Task.CYCLE_MONTH,
+        )
+        TaskAssignment.objects.create(task=other_dept_task, assignee=self.other_staff)
+        self.assertNotIn(
+            'Của tổ khác',
+            set(_manager_tasks_queryset(self.dept_user).values_list('title', flat=True)),
+        )
+
+        # Assignee vẫn thấy việc được giao trong "Việc của tôi".
         dept_asg = _staff_assignments_qs(self.dept_user)
         self.assertTrue(dept_asg.filter(task=mine).exists())
         self.assertFalse(dept_asg.filter(task=others).exists())
@@ -1128,6 +1166,11 @@ class RoleBasedAccessControlTestCase(TestCase):
         staff_asg = _staff_assignments_qs(self.staff_user)
         self.assertTrue(staff_asg.filter(task=mine).exists())
         self.assertFalse(staff_asg.filter(task=others).exists())
+
+        self.client.force_login(self.director)
+        dir_resp = self.client.get(reverse('manager_manage_tasks'))
+        self.assertContains(dir_resp, 'Của BGH')
+        self.assertNotContains(dir_resp, 'Của tổ')
 
 
 class StaffTaskDetailOversightTestCase(TestCase):
