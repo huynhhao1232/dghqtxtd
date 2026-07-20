@@ -110,6 +110,43 @@ class GroupPost(models.Model):
         return f'{self.department}: {preview}'
 
 
+class ChatMessage(models.Model):
+    """Tin nhắn chat nhóm thời gian thực trong Tổ/Nhóm."""
+
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.CASCADE,
+        related_name='chat_messages',
+        verbose_name='Tổ/Nhóm',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='chat_messages',
+        verbose_name='Người gửi',
+    )
+    text = models.TextField(verbose_name='Nội dung')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Tin nhắn chat nhóm'
+        verbose_name_plural = 'Tin nhắn chat nhóm'
+        ordering = ['created_at']
+
+    def __str__(self):
+        preview = (self.text or '')[:40]
+        return f'{self.department}: {preview}'
+
+    def to_chat_dict(self):
+        return {
+            'id': self.pk,
+            'user_id': self.user_id,
+            'username': str(self.user),
+            'text': self.text,
+            'created_at': self.created_at.isoformat(),
+        }
+
+
 class User(AbstractUser):
     """Custom user với phân quyền Lãnh đạo / Nhân viên."""
 

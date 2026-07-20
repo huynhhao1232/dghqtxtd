@@ -20,7 +20,7 @@ from .forms import (
     StaffEditForm,
     StyledPasswordChangeForm,
 )
-from .models import Department, GroupPost, User
+from .models import ChatMessage, Department, GroupPost, User
 from .vietnamese import sort_users_by_vietnamese_name, user_display_full_name
 from tasks.models import Task, TaskAssignment
 
@@ -393,3 +393,20 @@ def department_interaction(request, dept_id):
             'task_cards': task_cards,
         },
     )
+
+
+@login_required
+@require_http_methods(['GET'])
+def department_chat_messages(request, dept_id):
+    """REST: 50 tin nhắn chat gần nhất của Tổ/Nhóm (JSON)."""
+    department = get_object_or_404(Department, pk=dept_id)
+    if not department.user_can_access(request.user):
+        raise PermissionDenied('Bạn không có quyền xem chat nhóm này.')
+
+    qs = (
+        ChatMessage.objects.filter(department=department)
+        .select_related('user')
+        .order_by('-created_at')[:50]
+    )
+    messages_data = [m.to_chat_dict() for m in reversed(list(qs))]
+    return JsonResponse({'messages': messages_data})

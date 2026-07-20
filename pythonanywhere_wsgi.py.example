@@ -18,6 +18,12 @@ os.environ['DJANGO_CSRF_TRUSTED_ORIGINS'] = 'https://yourusername.pythonanywhere
 os.environ['DJANGO_SECRET_KEY'] = ' thay-bang-secret-key-moi '
 
 # Optional: Long Van S3 for media uploads (or set these in Web → Environment variables)
+# Long Van S3: FREE PythonAnywhere accounts cannot reach custom S3 hosts
+# (proxy allowlist → ProxyConnectionError / Tunnel 403). Keep USE_S3=0 on free
+# PA so media stays under ~/DGVC/media (Static files mapping /media/).
+# Paid PA, or after allowlisting s3-hcm5-r1.longvan.net, set USE_S3=1 below
+# (must be before get_wsgi_application so it overrides .env).
+os.environ['USE_S3'] = '0'
 # os.environ['USE_S3'] = '1'
 # os.environ['AWS_ACCESS_KEY_ID'] = '...'
 # os.environ['AWS_SECRET_ACCESS_KEY'] = '...'
