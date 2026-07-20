@@ -373,6 +373,9 @@ class SubtaskWBSTestCase(TestCase):
         self.assertContains(detail, base_title)
         self.assertContains(detail, 'Tiến độ theo Tổ/Nhóm')
         self.assertContains(detail, self.dept.name)
+        self.assertContains(detail, 'Xem chi tiết')
+        self.assertContains(detail, 'dept-accordion-item')
+        self.assertContains(detail, 'dept-members')
         self.assertIsNotNone(detail.context['hierarchy'])
         self.assertEqual(detail.context['hierarchy']['total'], 3)
 

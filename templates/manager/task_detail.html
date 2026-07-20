@@ -78,7 +78,7 @@
     </div>
 
     {% if hierarchy and hierarchy.departments %}
-    <div class="space-y-4">
+    <div class="space-y-4" id="dept-progress-accordion">
         <div class="flex items-center justify-between gap-3">
             <h2 class="text-base font-semibold text-gray-800">
                 <i class="fas fa-layer-group text-primary mr-2"></i>
@@ -88,26 +88,40 @@
         </div>
 
         {% for dept in hierarchy.departments %}
-        <section class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-            <header class="px-5 py-4 border-b border-gray-100 bg-slate-50/80 flex flex-wrap items-center justify-between gap-3">
+        <section class="dept-accordion-item bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"
+                 data-open="false">
+            <header class="dept-accordion-toggle px-5 py-4 bg-slate-50/80 flex flex-wrap items-center justify-between gap-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors"
+                    role="button"
+                    tabindex="0"
+                    aria-expanded="false"
+                    aria-controls="dept-members-{{ forloop.counter }}">
                 <div class="flex items-center gap-3 min-w-0">
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-semibold ring-1 ring-inset {{ dept.badge_classes }}">
                         <i class="fas fa-users text-xs"></i> {{ dept.name }}
                     </span>
                     <span class="text-sm text-gray-500">{{ dept.done }}/{{ dept.total }} xong</span>
                 </div>
-                <div class="flex items-center gap-3 min-w-[10rem]">
-                    <div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                        <div class="h-full rounded-full {% if dept.pct >= 100 %}bg-emerald-500{% elif dept.pct >= 40 %}bg-blue-500{% else %}bg-gray-400{% endif %}"
-                             style="width: {{ dept.pct }}%"></div>
+                <div class="flex items-center gap-3 flex-wrap justify-end">
+                    <div class="flex items-center gap-3 min-w-[10rem]">
+                        <div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden min-w-[5rem]">
+                            <div class="h-full rounded-full {% if dept.pct >= 100 %}bg-emerald-500{% elif dept.pct >= 40 %}bg-blue-500{% else %}bg-gray-400{% endif %}"
+                                 style="width: {{ dept.pct }}%"></div>
+                        </div>
+                        <span class="text-xs font-semibold text-gray-600 w-10 text-right">{{ dept.pct }}%</span>
+                        <span class="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium {{ dept.display_status_pill }}">
+                            {{ dept.display_status_label }}
+                        </span>
                     </div>
-                    <span class="text-xs font-semibold text-gray-600 w-10 text-right">{{ dept.pct }}%</span>
-                    <span class="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium {{ dept.display_status_pill }}">
-                        {{ dept.display_status_label }}
-                    </span>
+                    <button type="button"
+                            class="dept-detail-btn inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-primary bg-blue-50 hover:bg-blue-100 ring-1 ring-blue-600/15 transition">
+                        <i class="fas fa-chevron-down text-[10px] dept-chevron transition-transform"></i>
+                        <span class="dept-detail-label">Xem chi tiết</span>
+                    </button>
                 </div>
             </header>
-            <ul class="divide-y divide-gray-100">
+            <ul id="dept-members-{{ forloop.counter }}"
+                class="dept-members divide-y divide-gray-100 border-t border-gray-100 hidden"
+                hidden>
                 {% for person in dept.people %}
                 <li class="px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-50/60">
                     <div class="flex items-center gap-3 min-w-0">
@@ -381,6 +395,39 @@
 {% block extra_js %}
 <script>
 (function () {
+    var accordion = document.getElementById('dept-progress-accordion');
+    if (accordion) {
+        function setOpen(item, open) {
+            var panel = item.querySelector('.dept-members');
+            var toggle = item.querySelector('.dept-accordion-toggle');
+            var label = item.querySelector('.dept-detail-label');
+            var chevron = item.querySelector('.dept-chevron');
+            item.setAttribute('data-open', open ? 'true' : 'false');
+            if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (panel) {
+                panel.classList.toggle('hidden', !open);
+                if (open) panel.removeAttribute('hidden');
+                else panel.setAttribute('hidden', '');
+            }
+            if (label) label.textContent = open ? 'Thu gọn' : 'Xem chi tiết';
+            if (chevron) chevron.classList.toggle('rotate-180', open);
+        }
+
+        accordion.querySelectorAll('.dept-accordion-item').forEach(function (item) {
+            var toggle = item.querySelector('.dept-accordion-toggle');
+            if (!toggle) return;
+            function onToggle(e) {
+                if (e.target.closest('a')) return;
+                e.preventDefault();
+                setOpen(item, item.getAttribute('data-open') !== 'true');
+            }
+            toggle.addEventListener('click', onToggle);
+            toggle.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') onToggle(e);
+            });
+        });
+    }
+
     var modal = document.getElementById('grade-modal');
     var form = document.getElementById('grade-form');
     var label = document.getElementById('grade-target-label');
