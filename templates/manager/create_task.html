@@ -109,44 +109,6 @@
                         {% for e in form.primary_department.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
                     </div>
 
-                    <!-- Cách thức thực hiện — chỉ hiện khi giao Tổ/Nhóm -->
-                    <div id="dept-execution-mode">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">
-                            Cách thức thực hiện
-                            <span class="text-gray-400 font-normal">(tùy chọn)</span>
-                        </label>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" id="exec-mode-cards">
-                            <label class="exec-mode-card relative flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition
-                                          border-blue-400 bg-blue-50/80"
-                                   data-exec="leader_coordinate">
-                                <input type="radio" name="department_execution_mode" value="leader_coordinate"
-                                       class="sr-only exec-mode-radio"
-                                       {% if form.department_execution_mode.value != 'all_members' %}checked{% endif %}>
-                                <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-blue-100 text-primary">
-                                    <i class="fas fa-user-tie"></i>
-                                </span>
-                                <span class="min-w-0">
-                                    <span class="block text-sm font-semibold text-gray-900">Giao cho Trưởng tổ điều phối</span>
-                                    <span class="block text-xs text-gray-500 mt-0.5">Tổ/Trưởng tổ nhận việc và phân công lại thành viên.</span>
-                                </span>
-                            </label>
-                            <label class="exec-mode-card relative flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition
-                                          border-gray-200 bg-white hover:border-gray-300"
-                                   data-exec="all_members">
-                                <input type="radio" name="department_execution_mode" value="all_members"
-                                       class="sr-only exec-mode-radio"
-                                       {% if form.department_execution_mode.value == 'all_members' %}checked{% endif %}>
-                                <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-50 border border-gray-100 text-gray-600">
-                                    <i class="fas fa-users"></i>
-                                </span>
-                                <span class="min-w-0">
-                                    <span class="block text-sm font-semibold text-gray-900">Mỗi thành viên tự thực hiện</span>
-                                    <span class="block text-xs text-gray-500 mt-0.5">Tạo một nhiệm vụ riêng cho từng thành viên trong tổ.</span>
-                                </span>
-                            </label>
-                        </div>
-                    </div>
-
                     <div id="coord-section">
                         <label class="block text-sm font-medium text-gray-700 mb-1.5">
                             <i class="fas fa-handshake text-emerald-600 mr-1"></i> Đơn vị Phối hợp
@@ -169,9 +131,12 @@
                     </div>
                 </div>
 
-                <!-- Batch departments: một Task chung, nhiều bản phân công độc lập -->
-                <div id="panel-batch-department" class="mt-4 hidden">
+                <!-- Batch departments: giao đồng loạt (theo tổ hoặc theo từng thành viên) -->
+                <div id="panel-batch-department" class="mt-4 hidden space-y-4">
                     <div id="batch-dept-picker" class="relative">
+                        <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                            <i class="fas fa-layer-group text-blue-600 mr-1"></i> Tổ/Nhóm nhận việc <span class="text-red-500">*</span>
+                        </label>
                         <div id="batch-dept-field"
                              class="min-h-[3rem] w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white flex flex-wrap gap-2 items-center cursor-text transition hover:border-blue-300 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500">
                             <div id="batch-dept-tags" class="contents"></div>
@@ -184,7 +149,44 @@
                         </div>
                         <div id="batch-dept-hidden-inputs"></div>
                     </div>
-                    <p class="mt-1.5 text-xs text-gray-400">
+
+                    <div id="batch-execution-mode">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            Cách thức thực hiện
+                        </label>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" id="exec-mode-cards">
+                            <label class="exec-mode-card relative flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition
+                                          border-blue-400 bg-blue-50/80"
+                                   data-exec="leader_coordinate">
+                                <input type="radio" name="department_execution_mode" value="leader_coordinate"
+                                       class="sr-only exec-mode-radio"
+                                       {% if form.department_execution_mode.value != 'all_members' %}checked{% endif %}>
+                                <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-blue-100 text-primary">
+                                    <i class="fas fa-user-tie"></i>
+                                </span>
+                                <span class="min-w-0">
+                                    <span class="block text-sm font-semibold text-gray-900">Giao cả tổ — Trưởng tổ nhận việc</span>
+                                    <span class="block text-xs text-gray-500 mt-0.5">Một nhiệm vụ chung, mỗi Tổ/Nhóm một bản nộp độc lập.</span>
+                                </span>
+                            </label>
+                            <label class="exec-mode-card relative flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition
+                                          border-gray-200 bg-white hover:border-gray-300"
+                                   data-exec="all_members">
+                                <input type="radio" name="department_execution_mode" value="all_members"
+                                       class="sr-only exec-mode-radio"
+                                       {% if form.department_execution_mode.value == 'all_members' %}checked{% endif %}>
+                                <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-50 border border-gray-100 text-gray-600">
+                                    <i class="fas fa-users"></i>
+                                </span>
+                                <span class="min-w-0">
+                                    <span class="block text-sm font-semibold text-gray-900">Mỗi thành viên tự thực hiện</span>
+                                    <span class="block text-xs text-gray-500 mt-0.5">Giao cả tổ — mỗi thành viên một việc riêng.</span>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <p id="batch-mode-help" class="text-xs text-gray-400">
                         Một nhiệm vụ chung, mỗi Tổ/Nhóm có bản nộp minh chứng và kết quả đánh giá độc lập.
                     </p>
                     {% for e in form.batch_departments.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
@@ -253,10 +255,10 @@
         syncExecModeUI();
     }
 
-    // ── Cách thức thực hiện (chỉ panel Tổ/Nhóm) ──
+    // ── Cách thức thực hiện (Giao đồng loạt) ──
     var execCards = document.querySelectorAll('.exec-mode-card');
     var execRadios = document.querySelectorAll('.exec-mode-radio');
-    var coordSection = document.getElementById('coord-section');
+    var batchModeHelp = document.getElementById('batch-mode-help');
 
     function currentExecMode() {
         var checked = document.querySelector('.exec-mode-radio:checked');
@@ -279,9 +281,10 @@
                         : 'bg-gray-50 border-gray-100 text-gray-600');
             }
         });
-        if (coordSection) {
-            // Phối hợp chỉ áp dụng khi Trưởng tổ điều phối
-            coordSection.classList.toggle('hidden', mode !== 'department' || exec === 'all_members');
+        if (batchModeHelp) {
+            batchModeHelp.textContent = exec === 'all_members'
+                ? 'Tạo một nhiệm vụ riêng cho từng thành viên trong các Tổ/Nhóm đã chọn (tiêu đề kèm tên người nhận).'
+                : 'Một nhiệm vụ chung, mỗi Tổ/Nhóm có bản nộp minh chứng và kết quả đánh giá độc lập.';
         }
     }
 

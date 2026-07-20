@@ -308,8 +308,8 @@ class SubtaskWBSTestCase(TestCase):
             ).exists()
         )
 
-    def test_department_all_members_creates_one_task_per_member(self):
-        """Mỗi thành viên tự thực hiện → N task cá nhân, không giao Chủ trì–Phối hợp."""
+    def test_batch_all_members_creates_one_task_per_member(self):
+        """Giao đồng loạt + Mỗi thành viên tự thực hiện → N task cá nhân."""
         self.client.force_login(self.manager)
         base_title = 'Nộp sổ chủ nhiệm'
         response = self.client.post(reverse('manager_create_task'), {
@@ -317,8 +317,8 @@ class SubtaskWBSTestCase(TestCase):
             'description': 'Mỗi GV nộp riêng',
             'deadline': self.parent.deadline.isoformat(),
             'cycle': Task.CYCLE_MONTH,
-            'assign_mode': 'department',
-            'primary_department': self.dept.pk,
+            'assign_mode': 'batch_department',
+            'batch_departments': [self.dept.pk],
             'department_execution_mode': 'all_members',
         })
         self.assertEqual(response.status_code, 302)
@@ -344,13 +344,13 @@ class SubtaskWBSTestCase(TestCase):
                 ).exists()
             )
 
-        # Không tạo assignment kiểu tổ / chỉ trưởng tổ nhận một task chung
+        # Không tạo task giao theo tổ (assignee_department)
         self.assertFalse(
-            Task.objects.filter(title=base_title, primary_department=self.dept).exists()
+            Task.objects.filter(title=base_title).exists()
         )
 
     def test_department_leader_coordinate_keeps_existing_flow(self):
-        """Mặc định / leader_coordinate → giao Trưởng tổ Chủ trì như cũ."""
+        """Chủ trì — Phối hợp → luôn giao Trưởng tổ Chủ trì như cũ."""
         self.client.force_login(self.manager)
         title = 'Họp tổ chuyên môn'
         response = self.client.post(reverse('manager_create_task'), {
@@ -360,7 +360,6 @@ class SubtaskWBSTestCase(TestCase):
             'cycle': Task.CYCLE_MONTH,
             'assign_mode': 'department',
             'primary_department': self.dept.pk,
-            'department_execution_mode': 'leader_coordinate',
         })
         self.assertEqual(response.status_code, 302)
         task = Task.objects.get(title=title)

@@ -91,7 +91,7 @@ class TaskAssignForm(forms.ModelForm):
         required=False,
         widget=forms.RadioSelect,
         label='Cách thức thực hiện',
-        help_text='Chỉ áp dụng khi giao cho Tổ/Nhóm (Chủ trì).',
+        help_text='Chỉ áp dụng khi Giao đồng loạt nhiều Tổ/Nhóm.',
     )
     assignees = forms.ModelMultipleChoiceField(
         queryset=User.objects.none(),
@@ -213,53 +213,68 @@ class TaskAssignForm(forms.ModelForm):
             cleaned['batch_departments'] = Department.objects.none()
             cleaned['department_execution_mode'] = self.EXEC_LEADER
         elif mode == self.ASSIGN_DEPARTMENT:
+            # Chủ trì — Phối hợp: luôn giao Trưởng tổ điều phối.
             if not primary:
                 raise forms.ValidationError('Vui lòng chọn Đơn vị Chủ trì.')
-            exec_mode = cleaned.get('department_execution_mode') or self.EXEC_LEADER
-            if exec_mode not in {self.EXEC_LEADER, self.EXEC_ALL_MEMBERS}:
-                exec_mode = self.EXEC_LEADER
-            cleaned['department_execution_mode'] = exec_mode
-
-            if exec_mode == self.EXEC_ALL_MEMBERS:
-                # Mỗi thành viên tự thực hiện: một Task cá nhân / thành viên.
-                members = list(
-                    primary.members.filter(is_active=True)
-                    .exclude(role=User.ROLE_DIRECTOR)
-                    .order_by('last_name', 'first_name', 'username')
-                )
-                if not members:
+            cleaned['department_execution_mode'] = self.EXEC_LEADER
+            primary_leader = self._validate_dept_leader(primary, 'Đơn vị Chủ trì')
+            coord_leaders = []
+            for dept in coords:
+                if dept.pk == primary.pk:
                     raise forms.ValidationError(
-                        f'Tổ/Nhóm "{primary.name}" chưa có thành viên để giao đồng loạt.'
+                        f'Không thể chọn "{dept.name}" vừa là Chủ trì vừa là Phối hợp.'
                     )
-                cleaned['assignees'] = members
-                cleaned['coordinating_departments'] = Department.objects.none()
-                cleaned['batch_departments'] = Department.objects.none()
-            else:
-                primary_leader = self._validate_dept_leader(primary, 'Đơn vị Chủ trì')
-                coord_leaders = []
-                for dept in coords:
-                    if dept.pk == primary.pk:
-                        raise forms.ValidationError(
-                            f'Không thể chọn "{dept.name}" vừa là Chủ trì vừa là Phối hợp.'
-                        )
-                    coord_leaders.append(self._validate_dept_leader(dept, 'Đơn vị Phối hợp'))
-                # Giao assignment cho Trưởng tổ Chủ trì + các Trưởng tổ Phối hợp
-                leader_ids = [primary_leader.pk] + [u.pk for u in coord_leaders]
-                cleaned['assignees'] = User.objects.filter(pk__in=leader_ids)
-                cleaned['coordinating_departments'] = coords
-                cleaned['batch_departments'] = Department.objects.none()
+                coord_leaders.append(self._validate_dept_leader(dept, 'Đơn vị Phối hợp'))
+            # Giao assignment cho Trưởng tổ Chủ trì + các Trưởng tổ Phối hợp
+            leader_ids = [primary_leader.pk] + [u.pk for u in coord_leaders]
+            cleaned['assignees'] = User.objects.filter(pk__in=leader_ids)
+            cleaned['coordinating_departments'] = coords
+            cleaned['batch_departments'] = Department.objects.none()
         elif mode == self.ASSIGN_BATCH_DEPARTMENT:
             if not batch_depts:
                 raise forms.ValidationError(
                     'Vui lòng chọn ít nhất một Tổ/Nhóm để giao đồng loạt.'
                 )
-            for dept in batch_depts:
-                self._validate_dept_leader(dept, 'Tổ/Nhóm nhận việc')
-            # View sẽ tạo một Task gốc + assignment theo assignee_department cho mỗi tổ.
-            cleaned['assignees'] = User.objects.none()
+            exec_mode = cleaned.get('department_execution_mode') or self.EXEC_LEADER
+            if exec_mode not in {self.EXEC_LEADER, self.EXEC_ALL_MEMBERS}:
+                exec_mode = self.EXEC_LEADER
+            cleaned['department_execution_mode'] = exec_mode
             cleaned['primary_department'] = None
             cleaned['coordinating_departments'] = Department.objects.none()
-            cleaned['department_execution_mode'] = self.EXEC_LEADER
+
+            if exec_mode == self.EXEC_ALL_MEMBERS:
+                # Mỗi thành viên tự thực hiện: một Task cá nhân / thành viên (gộp các tổ đã chọn).
+                seen = set()
+                members = []
+                empty_depts = []
+                for dept in batch_depts:
+                    dept_members = list(
+                        dept.members.filter(is_active=True)
+                        .exclude(role=User.ROLE_DIRECTOR)
+                        .order_by('last_name', 'first_name', 'username')
+                    )
+                    if not dept_members:
+                        empty_depts.append(dept.name)
+                    for member in dept_members:
+                        if member.pk in seen:
+                            continue
+                        seen.add(member.pk)
+                        members.append(member)
+                if empty_depts:
+                    raise forms.ValidationError(
+                        'Các Tổ/Nhóm chưa có thành viên để giao đồng loạt: '
+                        + ', '.join(empty_depts)
+                    )
+                if not members:
+                    raise forms.ValidationError(
+                        'Không có thành viên nào trong các Tổ/Nhóm đã chọn.'
+                    )
+                cleaned['assignees'] = members
+            else:
+                for dept in batch_depts:
+                    self._validate_dept_leader(dept, 'Tổ/Nhóm nhận việc')
+                # View sẽ tạo một Task gốc + assignment theo assignee_department cho mỗi tổ.
+                cleaned['assignees'] = User.objects.none()
 
         files = cleaned.get('attachments') or []
         if len(files) > TaskAttachment.MAX_COUNT:

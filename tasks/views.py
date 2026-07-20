@@ -1167,6 +1167,48 @@ def manager_create_task(request):
             if mode == TaskAssignForm.ASSIGN_BATCH_DEPARTMENT:
                 departments = list(form.cleaned_data['batch_departments'])
                 attachments = form.cleaned_data.get('attachments') or []
+                exec_mode = form.cleaned_data.get('department_execution_mode')
+
+                # Giao đồng loạt — mỗi thành viên tự thực hiện: 1 Task + 1 Assignment / người
+                if exec_mode == TaskAssignForm.EXEC_ALL_MEMBERS:
+                    members = list(form.cleaned_data['assignees'])
+                    base_title = form.cleaned_data['title']
+                    first_task = None
+                    with transaction.atomic():
+                        for member in members:
+                            display = str(member).strip() or member.username
+                            task = Task.objects.create(
+                                title=f'{base_title} - [{display}]',
+                                description=form.cleaned_data['description'],
+                                deadline=form.cleaned_data['deadline'],
+                                cycle=form.cleaned_data['cycle'],
+                                created_by=request.user,
+                                primary_department=None,
+                            )
+                            for uploaded_file in attachments:
+                                try:
+                                    uploaded_file.seek(0)
+                                except (AttributeError, ValueError):
+                                    pass
+                                TaskAttachment.objects.create(
+                                    task=task,
+                                    file=uploaded_file,
+                                    original_name=uploaded_file.name,
+                                    file_size=uploaded_file.size,
+                                )
+                            TaskAssignment.objects.create(task=task, assignee=member)
+                            if first_task is None:
+                                first_task = task
+
+                    dept_label = ', '.join(d.name for d in departments) or 'Tổ/Nhóm'
+                    messages.success(
+                        request,
+                        f'Đã giao "{base_title}" cho {len(members)} thành viên '
+                        f'({dept_label}) — mỗi người một nhiệm vụ riêng.',
+                    )
+                    return _after_create_redirect(first_task)
+
+                # Mặc định: một Task chung, mỗi tổ một bản phân công độc lập
                 with transaction.atomic():
                     task = Task.objects.create(
                         title=form.cleaned_data['title'],
@@ -1201,51 +1243,6 @@ def manager_create_task(request):
                     f'(mỗi tổ một bản nộp độc lập).',
                 )
                 return _after_create_redirect(task)
-
-            # Tổ/Nhóm — mỗi thành viên tự thực hiện: 1 Task + 1 Assignment / người
-            if (
-                mode == TaskAssignForm.ASSIGN_DEPARTMENT
-                and form.cleaned_data.get('department_execution_mode')
-                == TaskAssignForm.EXEC_ALL_MEMBERS
-            ):
-                members = list(form.cleaned_data['assignees'])
-                attachments = form.cleaned_data.get('attachments') or []
-                base_title = form.cleaned_data['title']
-                dept = form.cleaned_data.get('primary_department')
-                first_task = None
-                with transaction.atomic():
-                    for member in members:
-                        display = str(member).strip() or member.username
-                        task = Task.objects.create(
-                            title=f'{base_title} - [{display}]',
-                            description=form.cleaned_data['description'],
-                            deadline=form.cleaned_data['deadline'],
-                            cycle=form.cleaned_data['cycle'],
-                            created_by=request.user,
-                            primary_department=None,
-                        )
-                        for uploaded_file in attachments:
-                            try:
-                                uploaded_file.seek(0)
-                            except (AttributeError, ValueError):
-                                pass
-                            TaskAttachment.objects.create(
-                                task=task,
-                                file=uploaded_file,
-                                original_name=uploaded_file.name,
-                                file_size=uploaded_file.size,
-                            )
-                        TaskAssignment.objects.create(task=task, assignee=member)
-                        if first_task is None:
-                            first_task = task
-
-                dept_label = dept.name if dept else 'Tổ/Nhóm'
-                messages.success(
-                    request,
-                    f'Đã giao "{base_title}" cho {len(members)} thành viên {dept_label} '
-                    f'(mỗi người một nhiệm vụ riêng).',
-                )
-                return _after_create_redirect(first_task)
 
             task = form.save(commit=False)
             task.created_by = request.user
