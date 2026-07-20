@@ -1566,3 +1566,200 @@ class StaffTaskDetailOversightTestCase(TestCase):
         self.assertContains(resp, self.task.title)
         # Chỉ xem oversight — không cập nhật tiến độ thay thành viên
         self.assertFalse(resp.context['can_update'])
+
+class AddTaskPerformersTestCase(TestCase):
+    """Thêm cá nhân / Tổ vào công việc đã giao (manager detail)."""
+
+    def setUp(self):
+        self.director = User.objects.create_user(
+            username='dir_add',
+            password='x',
+            is_manager=True,
+            first_name='Giám',
+            last_name='Đốc',
+        )
+        self.dept_user = User.objects.create_user(
+            username='dept_add',
+            password='x',
+            role=User.ROLE_DEPARTMENT,
+            first_name='Tổ',
+            last_name='Trưởng',
+        )
+        self.staff1 = User.objects.create_user(
+            username='staff_add1',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='A',
+            last_name='Nguyễn',
+        )
+        self.staff2 = User.objects.create_user(
+            username='staff_add2',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='B',
+            last_name='Trần',
+        )
+        self.other_dept_leader = User.objects.create_user(
+            username='dept_add2',
+            password='x',
+            role=User.ROLE_DEPARTMENT,
+            first_name='Tổ',
+            last_name='Hai',
+        )
+        self.dept = Department.objects.create(name='Tổ Add 1', leader=self.dept_user)
+        self.dept.members.add(self.dept_user, self.staff1, self.staff2)
+        self.dept2 = Department.objects.create(name='Tổ Add 2', leader=self.other_dept_leader)
+        self.dept2.members.add(self.other_dept_leader)
+        self.today = timezone.localdate()
+        self.client = Client()
+
+    def test_detail_shows_add_section_for_creator(self):
+        task = Task.objects.create(
+            title='Việc cá nhân',
+            created_by=self.director,
+            deadline=self.today + timedelta(days=5),
+            cycle=Task.CYCLE_MONTH,
+        )
+        TaskAssignment.objects.create(task=task, assignee=self.staff1)
+        self.client.force_login(self.director)
+        resp = self.client.get(reverse('manager_task_detail', args=[task.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context['can_add_performers'])
+        self.assertContains(resp, 'Thêm người / tổ thực hiện')
+        self.assertContains(resp, 'Thêm người nhận')
+
+    def test_add_individual_creates_assignment_and_notification(self):
+        task = Task.objects.create(
+            title='Việc multi',
+            created_by=self.director,
+            deadline=self.today + timedelta(days=5),
+            cycle=Task.CYCLE_MONTH,
+        )
+        TaskAssignment.objects.create(task=task, assignee=self.staff1)
+        self.client.force_login(self.director)
+        resp = self.client.post(
+            reverse('manager_task_add_performers', args=[task.pk]),
+            {'assignees': [self.staff2.pk]},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(task.assignments.filter(assignee=self.staff2).exists())
+        self.assertEqual(task.assignments.count(), 2)
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.staff2,
+                related_task=task,
+            ).exists()
+        )
+
+    def test_add_department_leader_coordinate(self):
+        task = Task.objects.create(
+            title='Việc batch tổ',
+            created_by=self.director,
+            deadline=self.today + timedelta(days=5),
+            cycle=Task.CYCLE_MONTH,
+        )
+        asg = TaskAssignment(task=task, assignee_department=self.dept)
+        asg._batch_department_assignment = True
+        asg.save()
+
+        self.client.force_login(self.director)
+        resp = self.client.post(
+            reverse('manager_task_add_performers', args=[task.pk]),
+            {
+                'departments': [self.dept2.pk],
+                'department_execution_mode': 'leader_coordinate',
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(
+            task.assignments.filter(assignee_department=self.dept2).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.other_dept_leader,
+                related_task=task,
+            ).exists()
+        )
+
+    def test_add_to_batch_key_creates_sibling_task(self):
+        batch_key = Task.new_batch_key()
+        t1 = Task.objects.create(
+            title='Báo cáo - [Nguyễn A]',
+            created_by=self.director,
+            deadline=self.today + timedelta(days=5),
+            cycle=Task.CYCLE_MONTH,
+            batch_key=batch_key,
+            source_department=self.dept,
+        )
+        TaskAssignment.objects.create(task=t1, assignee=self.staff1)
+
+        self.client.force_login(self.director)
+        resp = self.client.post(
+            reverse('manager_task_add_performers', args=[t1.pk]),
+            {'assignees': [self.staff2.pk]},
+        )
+        self.assertEqual(resp.status_code, 302)
+        siblings = Task.objects.filter(batch_key=batch_key)
+        self.assertEqual(siblings.count(), 2)
+        t2 = siblings.exclude(pk=t1.pk).get()
+        self.assertIn('[Trần B]', t2.title)
+        self.assertTrue(t2.assignments.filter(assignee=self.staff2).exists())
+
+    def test_department_creator_can_add_on_own_task_only(self):
+        mine = Task.objects.create(
+            title='Tổ giao',
+            created_by=self.dept_user,
+            deadline=self.today + timedelta(days=5),
+            cycle=Task.CYCLE_MONTH,
+        )
+        TaskAssignment.objects.create(task=mine, assignee=self.staff1)
+        others = Task.objects.create(
+            title='BGH giao',
+            created_by=self.director,
+            deadline=self.today + timedelta(days=5),
+            cycle=Task.CYCLE_MONTH,
+        )
+        TaskAssignment.objects.create(task=others, assignee=self.staff1)
+
+        self.client.force_login(self.dept_user)
+        ok = self.client.post(
+            reverse('manager_task_add_performers', args=[mine.pk]),
+            {'assignees': [self.staff2.pk]},
+        )
+        self.assertEqual(ok.status_code, 302)
+        self.assertTrue(mine.assignments.filter(assignee=self.staff2).exists())
+
+        forbidden = self.client.post(
+            reverse('manager_task_add_performers', args=[others.pk]),
+            {'assignees': [self.staff2.pk]},
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_manage_list_menu_has_add_link(self):
+        task = Task.objects.create(
+            title='List add',
+            created_by=self.director,
+            deadline=self.today + timedelta(days=5),
+            cycle=Task.CYCLE_MONTH,
+        )
+        TaskAssignment.objects.create(task=task, assignee=self.staff1)
+        self.client.force_login(self.director)
+        resp = self.client.get(reverse('manager_manage_tasks'))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Thêm người nhận')
+        self.assertContains(resp, f'/manager/tasks/{task.pk}/#add-performers')
+
+    def test_no_duplicate_assignee(self):
+        task = Task.objects.create(
+            title='Dup',
+            created_by=self.director,
+            deadline=self.today + timedelta(days=5),
+            cycle=Task.CYCLE_MONTH,
+        )
+        TaskAssignment.objects.create(task=task, assignee=self.staff1)
+        self.client.force_login(self.director)
+        self.client.post(
+            reverse('manager_task_add_performers', args=[task.pk]),
+            {'assignees': [self.staff1.pk]},
+        )
+        self.assertEqual(task.assignments.filter(assignee=self.staff1).count(), 1)
