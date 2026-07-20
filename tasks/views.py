@@ -1612,6 +1612,7 @@ def _person_leaf_from_assignment(assignment, task, today):
     grade = None
     if assignment.evaluation_result:
         grade = assignment.evaluation_result_label
+    has_proof = bool(assignment.proof_file)
     return {
         'name': assignment.target_display_name,
         'avatar_url': assignment.target_avatar_url,
@@ -1624,7 +1625,22 @@ def _person_leaf_from_assignment(assignment, task, today):
         'assignment': assignment,
         'grade': grade,
         'overdue_penalty': int(assignment.overdue_penalty or 0),
-        'detail_url': reverse('staff_task_detail', kwargs={'pk': assignment.pk}),
+        'has_proof': has_proof,
+        'proof_file_url': assignment.proof_file.url if has_proof else '',
+        'proof_name': assignment.proof_display_name if has_proof else '',
+        'proof_notes': assignment.notes or '',
+        'detail_url': reverse('manager_task_detail', kwargs={'pk': _manager_root_task_pk(task)}),
+        'assignment_id': assignment.pk,
+        'task_id': task.pk,
+        'is_completed': status == TaskAssignment.STATUS_COMPLETED,
+        'is_pending': status == TaskAssignment.STATUS_PENDING,
+        'can_bulk_extend': status != TaskAssignment.STATUS_COMPLETED,
+        'can_bulk_grade': status == TaskAssignment.STATUS_PENDING,
+        'completed_at': (
+            assignment.reviewed_at or assignment.submitted_at
+            if status == TaskAssignment.STATUS_COMPLETED
+            else None
+        ),
         'review_url': (
             reverse('manager_assignment_review', kwargs={
                 'pk': task.pk,
@@ -1634,6 +1650,27 @@ def _person_leaf_from_assignment(assignment, task, today):
             else None
         ),
     }
+
+
+def _assignment_for_participant(task, user_id):
+    """Tìm assignment ACTIVE của user trên task hoặc sub-task."""
+    if not user_id:
+        return None
+    for a in task.assignments.all():
+        if (
+            a.assignee_id == user_id
+            and a.handover_status == TaskAssignment.HANDOVER_ACTIVE
+        ):
+            return a
+    subtasks = getattr(task, 'prefetched_subtasks', None) or task.subtasks.all()
+    for sub in subtasks:
+        for a in sub.assignments.all():
+            if (
+                a.assignee_id == user_id
+                and a.handover_status == TaskAssignment.HANDOVER_ACTIVE
+            ):
+                return a
+    return None
 
 
 def _person_leaf_from_participation(part, task, today):
@@ -1654,6 +1691,8 @@ def _person_leaf_from_participation(part, task, today):
         task.deadline < today and status != TaskAssignment.STATUS_COMPLETED
     )
     user = part.user
+    linked_asg = _assignment_for_participant(task, user.id if user else None)
+    has_proof = bool(linked_asg and linked_asg.proof_file)
     return {
         'name': str(user),
         'avatar_url': user.avatar_url if user else '',
@@ -1663,12 +1702,145 @@ def _person_leaf_from_participation(part, task, today):
         'deadline': task.deadline,
         'is_overdue': is_overdue,
         'task': task,
-        'assignment': None,
+        'assignment': linked_asg,
         'grade': grade,
         'overdue_penalty': int(part.overdue_penalty or 0),
-        'detail_url': reverse('manager_task_detail', kwargs={'pk': task.pk}),
-        'review_url': None,
+        'has_proof': has_proof,
+        'proof_file_url': linked_asg.proof_file.url if has_proof else '',
+        'proof_name': linked_asg.proof_display_name if has_proof else '',
+        'proof_notes': (linked_asg.notes if linked_asg else '') or '',
+        'detail_url': reverse('manager_task_detail', kwargs={'pk': _manager_root_task_pk(task)}),
+        'assignment_id': linked_asg.pk if linked_asg else None,
+        'task_id': task.pk,
+        'is_completed': status == TaskAssignment.STATUS_COMPLETED,
+        'is_pending': bool(linked_asg and linked_asg.status == TaskAssignment.STATUS_PENDING),
+        'can_bulk_extend': bool(linked_asg and linked_asg.status != TaskAssignment.STATUS_COMPLETED),
+        'can_bulk_grade': bool(linked_asg and linked_asg.status == TaskAssignment.STATUS_PENDING),
+        'completed_at': (
+            (linked_asg.reviewed_at or linked_asg.submitted_at)
+            if linked_asg and status == TaskAssignment.STATUS_COMPLETED
+            else None
+        ),
+        'review_url': (
+            reverse('manager_assignment_review', kwargs={
+                'pk': task.pk,
+                'assignment_pk': linked_asg.pk,
+            })
+            if linked_asg and linked_asg.status == TaskAssignment.STATUS_PENDING
+            else None
+        ),
     }
+
+
+def _flatten_hierarchy_members(hierarchy):
+    """Danh sách phẳng thành viên (kèm tổ) từ cây tiến độ."""
+    if not hierarchy:
+        return []
+    rows = []
+    for dept in hierarchy.get('departments', []):
+        for person in dept.get('people', []):
+            row = dict(person)
+            row['dept_id'] = dept.get('id')
+            row['dept_name'] = dept.get('name')
+            if row.get('completed_at'):
+                row['completed_at_display'] = timezone.localtime(
+                    row['completed_at']
+                ).strftime('%d/%m/%Y')
+            else:
+                row['completed_at_display'] = ''
+            rows.append(row)
+    return rows
+
+
+def _detail_scope_assignment_pks(root_task, user):
+    """Assignment pk hợp lệ trên trang chi tiết (chống POST giả mạo)."""
+    today = timezone.localdate()
+    hierarchy = _build_manager_task_hierarchy(root_task, user, today)
+    return {
+        row['assignment_id']
+        for row in _flatten_hierarchy_members(hierarchy)
+        if row.get('assignment_id')
+    }
+
+
+def _manager_task_detail_queryset(pk, user):
+    allowed = _get_managed_task_or_403(user, pk)
+    return get_object_or_404(
+        Task.objects.select_related(
+            'created_by',
+            'primary_department',
+            'primary_department__leader',
+            'source_department',
+        )
+        .prefetch_related(
+            'coordinating_departments',
+            'attachments',
+            Prefetch(
+                'participations',
+                queryset=TaskParticipation.objects.select_related(
+                    'user', 'department'
+                ),
+            ),
+            Prefetch(
+                'assignments',
+                queryset=TaskAssignment.objects.select_related(
+                    'assignee',
+                    'assignee_department',
+                    'assignee_department__leader',
+                ).order_by('pk'),
+            ),
+            Prefetch(
+                'subtasks',
+                queryset=Task.objects.select_related('scope_department').prefetch_related(
+                    Prefetch(
+                        'assignments',
+                        queryset=TaskAssignment.objects.select_related('assignee'),
+                    )
+                ),
+                to_attr='prefetched_subtasks',
+            ),
+        ),
+        pk=allowed.pk,
+        parent_task__isnull=True,
+    )
+
+
+def _build_manager_task_hierarchy(task, user, today):
+    """Xây cây tiến độ cho trang chi tiết công việc."""
+    if task.batch_key:
+        siblings = list(
+            _manager_tasks_queryset(user).filter(batch_key=task.batch_key)
+        )
+        if not siblings:
+            siblings = [task]
+        return _build_batch_tree_node(siblings, today)
+    if task.is_team_task:
+        return _build_team_tree_node(task, today)
+    if _task_has_department_assignments(task):
+        return _build_batch_department_tree_node(task, today)
+    assignees = [a for a in task.assignments.all() if a.assignee_id]
+    if len(assignees) > 1:
+        people = [
+            _person_leaf_from_assignment(a, task, today) for a in assignees
+        ]
+        dept_node = _dept_node(
+            type('D', (), {
+                'pk': 0,
+                'name': 'Người nhận',
+                'badge_classes': 'bg-slate-100 text-slate-700 ring-slate-500/20',
+            })(),
+            people,
+        )
+        return _tree_node_meta(
+            task.title,
+            [dept_node],
+            today,
+            deadline=task.deadline,
+            task=task,
+            node_id=f'task-{task.pk}',
+            kind='multi',
+        )
+    return None
 
 
 def _dept_node(dept, people, badge_classes=None):
@@ -2599,7 +2771,273 @@ def manager_task_extend(request, pk):
             'penalized_count': penalized,
             'batch_count': len(siblings),
         })
+    if request.POST.get('next') == 'detail':
+        return redirect('manager_task_detail', pk=task.pk)
     return redirect('manager_manage_tasks')
+
+
+def _filter_member_rows(rows, *, status='', dept='', q=''):
+    """Lọc danh sách thành viên theo query (dùng cho export)."""
+    status = (status or '').strip()
+    dept = (dept or '').strip()
+    q = (q or '').strip().lower()
+    filtered = rows
+    if status == 'completed':
+        filtered = [r for r in filtered if r.get('is_completed')]
+    elif status == 'incomplete':
+        filtered = [r for r in filtered if not r.get('is_completed')]
+    elif status == 'pending':
+        filtered = [r for r in filtered if r.get('is_pending')]
+    if dept:
+        try:
+            dept_id = int(dept)
+            filtered = [r for r in filtered if r.get('dept_id') == dept_id]
+        except (TypeError, ValueError):
+            pass
+    if q:
+        filtered = [
+            r for r in filtered
+            if q in (r.get('name') or '').lower()
+            or q in (r.get('dept_name') or '').lower()
+        ]
+    return filtered
+
+
+def _export_task_detail_workbook(task, member_rows):
+    wb = Workbook()
+    ws_done = wb.active
+    ws_done.title = 'Da hoan thanh'
+    ws_done.append(['STT', 'Họ và tên', 'Ngày hoàn thành', 'Tổ/Nhóm'])
+
+    done_rows = [r for r in member_rows if r.get('is_completed')]
+    for idx, row in enumerate(done_rows, start=1):
+        ws_done.append([
+            idx,
+            row.get('name') or '—',
+            row.get('completed_at_display') or '—',
+            row.get('dept_name') or '—',
+        ])
+
+    ws_pending = wb.create_sheet('Chua hoan thanh')
+    ws_pending.append(['STT', 'Họ và tên', 'Trạng thái', 'Tổ/Nhóm', 'Hạn chót'])
+    pending_rows = [r for r in member_rows if not r.get('is_completed')]
+    for idx, row in enumerate(pending_rows, start=1):
+        deadline = row.get('deadline')
+        ws_pending.append([
+            idx,
+            row.get('name') or '—',
+            row.get('status_label') or '—',
+            row.get('dept_name') or '—',
+            deadline.strftime('%d/%m/%Y') if deadline else '—',
+        ])
+
+    summary = wb.create_sheet('Tong hop')
+    summary.append(['Tiêu chí', 'Giá trị'])
+    summary.append(['Công việc', task.title])
+    summary.append(['Hạn chót', task.deadline.strftime('%d/%m/%Y') if task.deadline else '—'])
+    summary.append(['Tổng thành viên', len(member_rows)])
+    summary.append(['Đã hoàn thành', len(done_rows)])
+    summary.append(['Chưa hoàn thành', len(pending_rows)])
+    return wb
+
+
+@assigner_required
+@require_http_methods(['GET'])
+def manager_task_export_excel(request, pk):
+    task = _manager_task_detail_queryset(pk, request.user)
+    today = timezone.localdate()
+    hierarchy = _build_manager_task_hierarchy(task, request.user, today)
+    rows = _flatten_hierarchy_members(hierarchy)
+    rows = _filter_member_rows(
+        rows,
+        status=request.GET.get('status'),
+        dept=request.GET.get('dept'),
+        q=request.GET.get('q'),
+    )
+
+    wb = _export_task_detail_workbook(task, rows)
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    slug = ''.join(c if c.isalnum() else '_' for c in task.title)[:40].strip('_') or 'Nhiem_vu'
+    filename = f'bao_cao_{slug}_{timezone.localtime().strftime("%Y%m%d_%H%M%S")}.xlsx'
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+@assigner_required
+@require_POST
+def manager_task_bulk_extend(request, pk):
+    """Gia hạn hàng loạt cho các thành viên được chọn."""
+    task = _manager_task_detail_queryset(pk, request.user)
+    allowed_pks = _detail_scope_assignment_pks(task, request.user)
+    raw_ids = request.POST.getlist('assignment_ids')
+    try:
+        selected_ids = {int(x) for x in raw_ids if str(x).strip().isdigit()}
+    except (TypeError, ValueError):
+        selected_ids = set()
+    selected_ids &= allowed_pks
+    if not selected_ids:
+        messages.error(request, 'Vui lòng chọn ít nhất một thành viên chưa hoàn thành.')
+        return redirect('manager_task_detail', pk=task.pk)
+
+    with_penalty = _truthy_post(request.POST.get('with_penalty'))
+    new_deadline = _parse_extend_deadline(request.POST.get('new_deadline'))
+    days = None
+    use_absolute = new_deadline is not None
+    if not use_absolute:
+        try:
+            days = int(request.POST.get('days', 3))
+        except (TypeError, ValueError):
+            days = 3
+        if days not in (3, 5):
+            days = 3
+
+    assignments = list(
+        TaskAssignment.objects.filter(
+            pk__in=selected_ids,
+            handover_status=TaskAssignment.HANDOVER_ACTIVE,
+        )
+        .exclude(status=TaskAssignment.STATUS_COMPLETED)
+        .select_related('task', 'assignee', 'assignee_department')
+    )
+    if not assignments:
+        messages.error(request, 'Không có bản phân công hợp lệ để gia hạn.')
+        return redirect('manager_task_detail', pk=task.pk)
+
+    today = timezone.localdate()
+    tasks_by_id = {}
+    for asg in assignments:
+        sibling_task = asg.task
+        if not _user_can_administer_managed_task(request.user, sibling_task):
+            continue
+        if use_absolute:
+            if new_deadline <= today:
+                messages.error(request, 'Hạn mới phải sau ngày hôm nay.')
+                return redirect('manager_task_detail', pk=task.pk)
+            if new_deadline < sibling_task.deadline:
+                messages.error(request, 'Hạn mới không được sớm hơn hạn hiện tại của từng người.')
+                return redirect('manager_task_detail', pk=task.pk)
+            sibling_task.deadline = new_deadline
+        else:
+            sibling_task.deadline = sibling_task.deadline + timedelta(days=days)
+        tasks_by_id[sibling_task.pk] = sibling_task
+
+    if not tasks_by_id:
+        messages.error(request, 'Bạn không có quyền gia hạn các mục đã chọn.')
+        return redirect('manager_task_detail', pk=task.pk)
+
+    penalized = 0
+    notify_deadline = None
+    with transaction.atomic():
+        for sibling_task in tasks_by_id.values():
+            sibling_task.save(update_fields=['deadline', 'updated_at'])
+            notify_deadline = sibling_task.deadline
+        if with_penalty:
+            for asg in assignments:
+                if asg.overdue_penalty:
+                    continue
+                asg.apply_overdue_extend_penalty()
+                asg.save(
+                    update_fields=[
+                        'extended_with_penalty',
+                        'overdue_penalty',
+                        'updated_at',
+                    ]
+                )
+                penalized += 1
+        seen_users = set()
+        deadline_txt = (notify_deadline or task.deadline).strftime('%d/%m/%Y')
+        for asg in assignments:
+            user = asg.acting_user
+            if not user or user.id in seen_users:
+                continue
+            seen_users.add(user.id)
+            if with_penalty:
+                msg = (
+                    f'Công việc "{asg.task.title}" đã được gia hạn đến {deadline_txt} '
+                    f'kèm trừ −1 điểm thi đua do quá hạn.'
+                )
+            else:
+                msg = f'Công việc "{asg.task.title}" đã được gia hạn đến {deadline_txt}.'
+            Notification.objects.create(
+                recipient=user,
+                message=msg,
+                related_task=asg.task,
+            )
+
+    penalty_note = (
+        f' Đã ghi trừ −1 cho {penalized} người.'
+        if with_penalty and penalized
+        else ''
+    )
+    messages.success(
+        request,
+        f'Đã gia hạn {len(assignments)} thành viên được chọn.{penalty_note}',
+    )
+    return redirect('manager_task_detail', pk=task.pk)
+
+
+@manager_required
+@require_POST
+def manager_task_bulk_review(request, pk):
+    """Nghiệm thu hàng loạt (mặc định Đạt) cho các bản chờ duyệt."""
+    task = _manager_task_detail_queryset(pk, request.user)
+    allowed_pks = _detail_scope_assignment_pks(task, request.user)
+    raw_ids = request.POST.getlist('assignment_ids')
+    try:
+        selected_ids = {int(x) for x in raw_ids if str(x).strip().isdigit()}
+    except (TypeError, ValueError):
+        selected_ids = set()
+    selected_ids &= allowed_pks
+
+    form = ReviewForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, 'Dữ liệu đánh giá không hợp lệ.')
+        return redirect('manager_task_detail', pk=task.pk)
+
+    result = form.cleaned_data['evaluation_result']
+    comment = form.cleaned_data.get('manager_comment') or ''
+
+    assignments = TaskAssignment.objects.filter(
+        pk__in=selected_ids,
+        status=TaskAssignment.STATUS_PENDING,
+        task__is_subtask=False,
+    ).select_related('task', 'assignee', 'assignee_department')
+
+    graded = 0
+    with transaction.atomic():
+        for assignment in assignments:
+            if (
+                assignment.task.is_team_task
+                and assignment.pk
+                != getattr(assignment.task.get_canonical_assignment(), 'pk', None)
+            ):
+                continue
+            _apply_manager_review(
+                assignment,
+                evaluation_result=result,
+                comment=comment,
+            )
+            graded += 1
+
+    if not graded:
+        messages.error(
+            request,
+            'Không có bản nộp chờ duyệt hợp lệ trong danh sách đã chọn.',
+        )
+    else:
+        label = EvaluationResult.LABELS.get(result, result)
+        messages.success(
+            request,
+            f'Đã nghiệm thu {graded} thành viên: {label}.',
+        )
+    return redirect('manager_task_detail', pk=task.pk)
 
 
 @assigner_required
@@ -2730,85 +3168,12 @@ def manager_review_task(request, pk):
 @assigner_required
 @require_http_methods(['GET'])
 def manager_task_detail(request, pk):
-    allowed = _get_managed_task_or_403(request.user, pk)
-    task = get_object_or_404(
-        Task.objects.select_related(
-            'created_by',
-            'primary_department',
-            'primary_department__leader',
-            'source_department',
-        )
-        .prefetch_related(
-            'coordinating_departments',
-            'attachments',
-            Prefetch(
-                'participations',
-                queryset=TaskParticipation.objects.select_related(
-                    'user', 'department'
-                ),
-            ),
-            Prefetch(
-                'assignments',
-                queryset=TaskAssignment.objects.select_related(
-                    'assignee',
-                    'assignee_department',
-                    'assignee_department__leader',
-                ).order_by('pk'),
-            ),
-            Prefetch(
-                'subtasks',
-                queryset=Task.objects.select_related('scope_department').prefetch_related(
-                    Prefetch(
-                        'assignments',
-                        queryset=TaskAssignment.objects.select_related('assignee'),
-                    )
-                ),
-                to_attr='prefetched_subtasks',
-            ),
-        ),
-        pk=allowed.pk,
-        parent_task__isnull=True,
-    )
+    task = _manager_task_detail_queryset(pk, request.user)
     today = timezone.localdate()
-    hierarchy = None
+    hierarchy = _build_manager_task_hierarchy(task, request.user, today)
     display_title = task.title
-
-    if task.batch_key:
-        siblings = list(
-            _manager_tasks_queryset(request.user).filter(batch_key=task.batch_key)
-        )
-        if not siblings:
-            siblings = [task]
-        hierarchy = _build_batch_tree_node(siblings, today)
-        if hierarchy:
-            display_title = hierarchy['title']
-    elif task.is_team_task:
-        hierarchy = _build_team_tree_node(task, today)
-    elif _task_has_department_assignments(task):
-        hierarchy = _build_batch_department_tree_node(task, today)
-    else:
-        assignees = [a for a in task.assignments.all() if a.assignee_id]
-        if len(assignees) > 1:
-            people = [
-                _person_leaf_from_assignment(a, task, today) for a in assignees
-            ]
-            dept_node = _dept_node(
-                type('D', (), {
-                    'pk': 0,
-                    'name': 'Người nhận',
-                    'badge_classes': 'bg-slate-100 text-slate-700 ring-slate-500/20',
-                })(),
-                people,
-            )
-            hierarchy = _tree_node_meta(
-                task.title,
-                [dept_node],
-                today,
-                deadline=task.deadline,
-                task=task,
-                node_id=f'task-{task.pk}',
-                kind='multi',
-            )
+    if hierarchy and task.batch_key:
+        display_title = hierarchy['title']
 
     all_assignments = _active_assignments(task)
     canonical = task.get_canonical_assignment() if task.is_team_task else None
@@ -2879,6 +3244,14 @@ def manager_task_detail(request, pk):
             ensure_ascii=False,
         )
 
+    member_rows = _flatten_hierarchy_members(hierarchy)
+    dept_filter_options = []
+    if hierarchy:
+        dept_filter_options = [
+            {'id': d['id'], 'name': d['name']}
+            for d in hierarchy.get('departments', [])
+        ]
+
     return render(
         request,
         'manager/task_detail.html',
@@ -2886,6 +3259,8 @@ def manager_task_detail(request, pk):
             'task': task,
             'display_title': display_title,
             'hierarchy': hierarchy,
+            'member_rows': member_rows,
+            'dept_filter_options': dept_filter_options,
             'assignments': assignments,
             'participations': _active_participations(task),
             'submitted_count': submitted,

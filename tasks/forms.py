@@ -251,7 +251,11 @@ class TaskAssignForm(forms.ModelForm):
                 member_department_map = {}
                 empty_depts = []
                 for dept in batch_depts:
-                    dept_members = list(dept.assignable_members())
+                    dept_members = list(
+                        dept.members.filter(is_active=True)
+                        .exclude(role=User.ROLE_DIRECTOR)
+                        .order_by('last_name', 'first_name', 'username')
+                    )
                     if not dept_members:
                         empty_depts.append(dept.name)
                     for member in dept_members:
@@ -262,12 +266,12 @@ class TaskAssignForm(forms.ModelForm):
                         member_department_map[member.pk] = dept
                 if empty_depts:
                     raise forms.ValidationError(
-                        'Các Tổ/Nhóm chưa có thành viên hoạt động để giao đồng loạt: '
+                        'Các Tổ/Nhóm chưa có thành viên để giao đồng loạt: '
                         + ', '.join(empty_depts)
                     )
                 if not members:
                     raise forms.ValidationError(
-                        'Không có thành viên nào (đang hoạt động) trong các Tổ/Nhóm đã chọn.'
+                        'Không có thành viên nào trong các Tổ/Nhóm đã chọn.'
                     )
                 cleaned['assignees'] = members
                 cleaned['member_department_map'] = member_department_map
@@ -363,7 +367,11 @@ class DepartmentTaskAssignForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         member_qs = User.objects.none()
         if department is not None:
-            member_qs = department.assignable_members()
+            member_qs = (
+                department.members.filter(is_active=True)
+                .exclude(role=User.ROLE_DIRECTOR)
+                .order_by('last_name', 'first_name', 'username')
+            )
         self.fields['assignees'].queryset = member_qs
 
     def clean_assignees(self):
@@ -371,11 +379,13 @@ class DepartmentTaskAssignForm(forms.ModelForm):
         if not assignees:
             raise forms.ValidationError('Vui lòng chọn ít nhất một thành viên trong tổ.')
         if self.department is not None:
-            member_ids = set(self.department.assignable_members().values_list('pk', flat=True))
+            member_ids = set(
+                self.department.members.filter(is_active=True).values_list('pk', flat=True)
+            )
             invalid = [u for u in assignees if u.pk not in member_ids]
             if invalid:
                 raise forms.ValidationError(
-                    'Chỉ được giao việc cho thành viên đang hoạt động của tổ này.'
+                    'Chỉ được giao việc cho thành viên của tổ này.'
                 )
         return assignees
 
@@ -499,7 +509,9 @@ class AddMembersForm(forms.Form):
 
     def __init__(self, *args, department=None, exclude_ids=None, **kwargs):
         super().__init__(*args, **kwargs)
-        qs = User.bulk_assignable_queryset()
+        qs = User.objects.filter(
+            is_active=True,
+        ).exclude(role=User.ROLE_DIRECTOR)
         if department:
             qs = qs.filter(my_departments=department)
         if exclude_ids:
@@ -602,11 +614,14 @@ class AddTaskPerformersForm(forms.Form):
         elif departments and exec_mode == self.EXEC_ALL_MEMBERS:
             empty = []
             for dept in departments:
-                if not dept.assignable_members().exists():
+                members = dept.members.filter(is_active=True).exclude(
+                    role=User.ROLE_DIRECTOR
+                )
+                if not members.exists():
                     empty.append(dept.name)
             if empty:
                 raise forms.ValidationError(
-                    'Các Tổ/Nhóm chưa có thành viên hoạt động để thêm: ' + ', '.join(empty)
+                    'Các Tổ/Nhóm chưa có thành viên để thêm: ' + ', '.join(empty)
                 )
         return cleaned
 
@@ -734,7 +749,6 @@ class SubtaskCreateForm(forms.Form):
             qs = User.objects.filter(
                 pk__in=participant_ids,
                 is_active=True,
-                account_status=User.ACCOUNT_ACTIVE,
             ).exclude(role=User.ROLE_DIRECTOR).order_by('last_name', 'first_name')
             self.fields['deadline'].widget.attrs['max'] = parent_task.deadline.isoformat()
             self.fields['deadline'].initial = parent_task.deadline

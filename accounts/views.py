@@ -5,12 +5,13 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Count, Prefetch, Q
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 import json
+from io import BytesIO
 
 from .decorators import manager_required, redirect_by_role
 from .forms import (
@@ -19,9 +20,15 @@ from .forms import (
     ProfileUpdateForm,
     StaffCreateForm,
     StaffEditForm,
+    StaffImportForm,
     StyledPasswordChangeForm,
 )
 from .models import Department, User
+from .user_import import (
+    build_import_template_workbook,
+    import_users_from_rows,
+    read_import_file,
+)
 from .vietnamese import sort_users_by_vietnamese_name, user_display_full_name
 from tasks.forms import DepartmentTaskAssignForm
 from tasks.models import Task, TaskAssignment, TaskAttachment, TaskParticipation
@@ -91,7 +98,23 @@ def profile_view(request):
 
 @login_required
 def home_redirect(request):
-    return redirect_by_role(request.user)
+    return redirect_by_role(request.user    )
+
+
+@manager_required
+@require_http_methods(['GET'])
+def manager_staff_import_template(request):
+    """Tải file mẫu Excel import tài khoản."""
+    wb = build_import_template_workbook()
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename="mau_import_tai_khoan.xlsx"'
+    return response
 
 
 # ───────────────────────── Manager: Departments ─────────────────────────
@@ -266,9 +289,12 @@ def manager_staff_list(request):
     staff_list = sort_users_by_vietnamese_name(list(staff_qs))
 
     create_form = StaffCreateForm()
+    import_form = StaffImportForm()
     edit_form = None
     edit_user = None
     open_create = request.GET.get('action') == 'create'
+    open_import = request.GET.get('action') == 'import'
+    import_errors = request.session.pop('staff_import_errors', None)
     action = request.POST.get('action')
     staff_id = request.POST.get('staff_id') or request.GET.get('staff_id')
 
@@ -298,15 +324,46 @@ def manager_staff_list(request):
                 return redirect('manager_staff')
         elif action == 'toggle_active' and staff_id:
             staff = get_object_or_404(User, pk=staff_id)
-            if staff.account_status == User.ACCOUNT_INACTIVE:
-                staff.account_status = User.ACCOUNT_ACTIVE
-                state = 'mở khóa'
-            else:
-                staff.account_status = User.ACCOUNT_INACTIVE
-                state = 'khóa'
-            staff.save()
+            staff.is_active = not staff.is_active
+            staff.save(update_fields=['is_active'])
+            state = 'mở khóa' if staff.is_active else 'khóa'
             messages.success(request, f'Đã {state} tài khoản "{staff}".')
             return redirect('manager_staff')
+        elif action == 'import':
+            import_form = StaffImportForm(request.POST, request.FILES)
+            open_import = True
+            if import_form.is_valid():
+                try:
+                    rows = read_import_file(import_form.cleaned_data['file'])
+                except ValueError as exc:
+                    messages.error(request, str(exc))
+                else:
+                    if not rows:
+                        messages.warning(request, 'File không có dòng dữ liệu nào.')
+                    else:
+                        outcome = import_users_from_rows(rows)
+                        if outcome.created:
+                            messages.success(
+                                request,
+                                f'Đã import thành công {outcome.created} tài khoản.',
+                            )
+                        if outcome.skipped:
+                            messages.warning(
+                                request,
+                                f'Bỏ qua {outcome.skipped} dòng (lỗi hoặc trùng).',
+                            )
+                        if outcome.errors:
+                            request.session['staff_import_errors'] = [
+                                {
+                                    'row': e.row_num,
+                                    'username': e.username,
+                                    'message': e.message,
+                                }
+                                for e in outcome.errors[:50]
+                            ]
+                        if outcome.created and not outcome.errors:
+                            return redirect('manager_staff')
+                        return redirect(f"{reverse('manager_staff')}?action=import")
 
     return render(
         request,
@@ -317,9 +374,12 @@ def manager_staff_list(request):
             'dept_filter': dept_filter,
             'q': q,
             'create_form': create_form,
+            'import_form': import_form,
+            'import_errors': import_errors,
             'edit_form': edit_form,
             'edit_user': edit_user,
             'open_create': open_create,
+            'open_import': open_import,
             'open_edit': edit_form is not None,
             'edit_dept_options_json': json.dumps(
                 [{'id': d.pk, 'name': d.name} for d in Department.objects.all()],
@@ -336,6 +396,22 @@ def manager_staff_list(request):
             ),
         },
     )
+
+
+@manager_required
+@require_http_methods(['GET'])
+def manager_staff_import_template(request):
+    """Tải file mẫu Excel import tài khoản."""
+    wb = build_import_template_workbook()
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = 'attachment; filename="mau_import_tai_khoan.xlsx"'
+    return response
 
 
 # ───────────────────────── Department task Workspace ─────────────────────────

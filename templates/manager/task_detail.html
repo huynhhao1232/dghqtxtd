@@ -79,17 +79,82 @@
 
     {% if hierarchy and hierarchy.departments %}
     <div class="space-y-4" id="dept-progress-accordion">
-        <div class="flex items-center justify-between gap-3">
-            <h2 class="text-base font-semibold text-gray-800">
-                <i class="fas fa-layer-group text-primary mr-2"></i>
-                Tiến độ theo Tổ/Nhóm
-            </h2>
-            <span class="text-xs text-gray-400">{{ hierarchy.departments|length }} tổ · {{ hierarchy.total }} người</span>
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-4 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-base font-semibold text-gray-800">
+                        <i class="fas fa-layer-group text-primary mr-2"></i>
+                        Tiến độ theo Tổ/Nhóm
+                    </h2>
+                    <p class="text-xs text-gray-400 mt-0.5">{{ hierarchy.departments|length }} tổ · {{ hierarchy.total }} người</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <a id="member-export-link"
+                       href="{% url 'manager_task_export_excel' task.pk %}"
+                       class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition">
+                        <i class="fas fa-file-excel"></i> Xuất Excel
+                    </a>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-end gap-3 pt-1 border-t border-gray-100">
+                <div class="min-w-[10rem] flex-1">
+                    <label for="member-filter-q" class="block text-[11px] font-medium text-gray-500 mb-1">Tìm tên</label>
+                    <input type="search" id="member-filter-q" placeholder="Họ tên..."
+                           class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                </div>
+                <div class="min-w-[9rem]">
+                    <label for="member-filter-status" class="block text-[11px] font-medium text-gray-500 mb-1">Trạng thái</label>
+                    <select id="member-filter-status"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                        <option value="">Tất cả</option>
+                        <option value="completed">Đã hoàn thành</option>
+                        <option value="incomplete">Chưa hoàn thành</option>
+                        <option value="pending">Chờ nghiệm thu</option>
+                    </select>
+                </div>
+                <div class="min-w-[9rem]">
+                    <label for="member-filter-dept" class="block text-[11px] font-medium text-gray-500 mb-1">Tổ/Nhóm</label>
+                    <select id="member-filter-dept"
+                            class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                        <option value="">Tất cả</option>
+                        {% for d in dept_filter_options %}
+                        <option value="{{ d.id }}">{{ d.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="button" id="member-filter-reset"
+                        class="px-3 py-2 text-xs font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg transition">
+                    Xóa lọc
+                </button>
+            </div>
+
+            <div id="member-bulk-bar"
+                 class="hidden flex-wrap items-center gap-2 p-3 rounded-xl bg-blue-50 border border-blue-100">
+                <span class="text-xs font-medium text-blue-800">
+                    Đã chọn <strong id="member-selected-count">0</strong> người
+                </span>
+                <button type="button" id="btn-bulk-extend"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-800 bg-white ring-1 ring-blue-200 hover:bg-blue-50">
+                    <i class="fas fa-calendar-plus"></i> Gia hạn
+                </button>
+                {% if request.user.is_director %}
+                <button type="button" id="btn-bulk-grade"
+                        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-primary hover:bg-blue-800">
+                    <i class="fas fa-check-double"></i> Nghiệm thu hàng loạt
+                </button>
+                {% endif %}
+                <button type="button" id="btn-bulk-clear"
+                        class="ml-auto text-xs text-blue-600 hover:text-blue-800 font-medium">
+                    Bỏ chọn
+                </button>
+            </div>
         </div>
 
         {% for dept in hierarchy.departments %}
         <section class="dept-accordion-item bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden"
-                 data-open="false">
+                 data-open="false"
+                 data-dept-id="{{ dept.id }}">
             <header class="dept-accordion-toggle px-5 py-4 bg-slate-50/80 flex flex-wrap items-center justify-between gap-3 cursor-pointer select-none hover:bg-slate-100/80 transition-colors"
                     role="button"
                     tabindex="0"
@@ -123,8 +188,23 @@
                 class="dept-members divide-y divide-gray-100 border-t border-gray-100 hidden"
                 hidden>
                 {% for person in dept.people %}
-                <li class="px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-50/60">
+                <li class="person-row px-5 py-3.5 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-50/60"
+                    data-status="{% if person.is_completed %}completed{% elif person.is_pending %}pending{% else %}incomplete{% endif %}"
+                    data-dept-id="{{ dept.id }}"
+                    data-name="{{ person.name|lower }}"
+                    data-can-extend="{% if person.can_bulk_extend and person.assignment_id %}1{% else %}0{% endif %}"
+                    data-can-grade="{% if person.can_bulk_grade and person.assignment_id %}1{% else %}0{% endif %}">
                     <div class="flex items-center gap-3 min-w-0">
+                        {% if person.assignment_id %}
+                        <input type="checkbox"
+                               class="member-select rounded border-gray-300 text-primary focus:ring-primary shrink-0"
+                               value="{{ person.assignment_id }}"
+                               data-can-extend="{% if person.can_bulk_extend %}1{% else %}0{% endif %}"
+                               data-can-grade="{% if person.can_bulk_grade %}1{% else %}0{% endif %}"
+                               aria-label="Chọn {{ person.name }}">
+                        {% else %}
+                        <span class="w-4 shrink-0"></span>
+                        {% endif %}
                         <img src="{{ person.avatar_url }}" alt=""
                              class="w-10 h-10 rounded-full object-cover ring-1 ring-gray-200 shrink-0">
                         <div class="min-w-0">
@@ -149,10 +229,33 @@
                             Gia hạn −{{ person.overdue_penalty }}
                         </span>
                         {% endif %}
-                        <a href="{{ person.detail_url }}"
-                           class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 transition">
+                        {% if person.has_proof %}
+                        <button type="button"
+                                data-file-url="{{ person.proof_file_url }}"
+                                data-file-name="{{ person.proof_name }}"
+                                class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-700 bg-slate-50 ring-1 ring-slate-200 hover:bg-slate-100 max-w-[10rem] truncate"
+                                title="{{ person.proof_name }}">
+                            <i class="fas fa-paperclip text-primary shrink-0"></i>
+                            <span class="truncate">{{ person.proof_name }}</span>
+                        </button>
+                        {% else %}
+                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-gray-400 bg-gray-50 ring-1 ring-gray-100">
+                            <i class="fas fa-paperclip"></i> Chưa có MC
+                        </span>
+                        {% endif %}
+                        {% if person.has_proof %}
+                        <button type="button"
+                                data-file-url="{{ person.proof_file_url }}"
+                                data-file-name="{{ person.proof_name }}"
+                                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 transition">
                             <i class="fas fa-external-link-alt"></i> Xem bài
-                        </a>
+                        </button>
+                        {% else %}
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-400 bg-gray-50 ring-1 ring-gray-100 cursor-not-allowed"
+                              title="Thành viên chưa nộp minh chứng">
+                            <i class="fas fa-external-link-alt"></i> Chưa nộp
+                        </span>
+                        {% endif %}
                         {% if person.review_url and request.user.is_director %}
                         <button type="button"
                                 class="btn-grade inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-white hover:bg-blue-800"
@@ -429,6 +532,107 @@
     {% endif %}
 </div>
 
+<div id="bulk-extend-modal" class="hidden fixed inset-0 z-50">
+    <div class="absolute inset-0 bg-black/40" data-close-bulk-extend></div>
+    <div class="relative min-h-full flex items-center justify-center p-4">
+        <div class="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+            <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                <h3 class="text-base font-semibold text-gray-900">
+                    <i class="fas fa-calendar-plus text-primary mr-1.5"></i>Gia hạn hàng loạt
+                </h3>
+                <button type="button" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100" data-close-bulk-extend>
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form method="post" action="{% url 'manager_task_bulk_extend' task.pk %}" id="bulk-extend-form" class="p-5 space-y-4">
+                {% csrf_token %}
+                <div id="bulk-extend-hidden"></div>
+                <p class="text-sm text-gray-600">
+                    Gia hạn cho <strong id="bulk-extend-count">0</strong> thành viên đã chọn.
+                </p>
+                <label class="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" name="with_penalty" value="1" class="rounded border-gray-300 text-rose-600">
+                    Gia hạn kèm trừ −1 điểm thi đua (quá hạn)
+                </label>
+                <div>
+                    <label for="bulk-extend-deadline" class="block text-sm font-medium text-gray-700 mb-1.5">Hạn mới *</label>
+                    <input type="date" name="new_deadline" id="bulk-extend-deadline" required
+                           class="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                    <p class="text-xs text-gray-400 mt-1">Hạn hiện tại: {{ task.deadline|date:"d/m/Y" }}</p>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" data-close-bulk-extend
+                            class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">
+                        Hủy
+                    </button>
+                    <button type="submit"
+                            class="px-4 py-2 rounded-lg text-sm font-semibold bg-primary text-white hover:bg-blue-800">
+                        Xác nhận gia hạn
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% if request.user.is_director %}
+<div id="bulk-grade-modal" class="hidden fixed inset-0 z-50">
+    <div class="absolute inset-0 bg-black/40" data-close-bulk-grade></div>
+    <div class="relative min-h-full flex items-center justify-center p-4">
+        <div class="w-full max-w-lg bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+            <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                <h3 class="text-base font-semibold text-gray-900">
+                    <i class="fas fa-check-double text-primary mr-1.5"></i>Nghiệm thu hàng loạt
+                </h3>
+                <button type="button" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100" data-close-bulk-grade>
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form method="post" action="{% url 'manager_task_bulk_review' task.pk %}" id="bulk-grade-form" class="p-5 space-y-4">
+                {% csrf_token %}
+                <div id="bulk-grade-hidden"></div>
+                <p class="text-sm text-gray-600">
+                    Nghiệm thu <strong id="bulk-grade-count">0</strong> bản chờ duyệt đã chọn.
+                </p>
+                <fieldset>
+                    <legend class="text-sm font-medium text-gray-700 mb-2">Kết quả</legend>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <label class="cursor-pointer">
+                            <input type="radio" name="evaluation_result" value="DAT" class="peer sr-only" checked>
+                            <div class="border-2 border-gray-200 rounded-xl p-2.5 text-center text-xs font-semibold peer-checked:border-emerald-500 peer-checked:bg-emerald-50 text-gray-600">Đạt</div>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="evaluation_result" value="CHO_LAM_LAI" class="peer sr-only">
+                            <div class="border-2 border-gray-200 rounded-xl p-2.5 text-center text-xs font-semibold peer-checked:border-amber-500 peer-checked:bg-amber-50 text-gray-600">Làm lại</div>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="evaluation_result" value="TRE_BI_TRU_DIEM" class="peer sr-only">
+                            <div class="border-2 border-gray-200 rounded-xl p-2.5 text-center text-xs font-semibold peer-checked:border-rose-500 peer-checked:bg-rose-50 text-gray-600">Làm lại &amp; trừ 1</div>
+                        </label>
+                    </div>
+                </fieldset>
+                <div>
+                    <label for="bulk-grade-comment" class="block text-sm font-medium text-gray-700 mb-1.5">Nhận xét chung</label>
+                    <textarea id="bulk-grade-comment" name="manager_comment" rows="3"
+                              class="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                              placeholder="Nhận xét áp dụng cho tất cả người được chọn..."></textarea>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" data-close-bulk-grade
+                            class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">
+                        Hủy
+                    </button>
+                    <button type="submit"
+                            class="px-4 py-2 rounded-lg text-sm font-semibold bg-primary text-white hover:bg-blue-800">
+                        Xác nhận nghiệm thu
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <div id="grade-modal" class="hidden fixed inset-0 z-50">
     <div class="absolute inset-0 bg-black/40" data-close-grade></div>
     <div class="relative min-h-full flex items-center justify-center p-4">
@@ -579,6 +783,156 @@
     document.querySelectorAll('[data-close-handover]').forEach(function (el) {
         el.addEventListener('click', function () { showHand(false); });
     });
+
+    // ── Lọc / chọn hàng loạt / export ──
+    var exportBase = "{% url 'manager_task_export_excel' task.pk %}";
+    var filterQ = document.getElementById('member-filter-q');
+    var filterStatus = document.getElementById('member-filter-status');
+    var filterDept = document.getElementById('member-filter-dept');
+    var filterReset = document.getElementById('member-filter-reset');
+    var exportLink = document.getElementById('member-export-link');
+    var bulkBar = document.getElementById('member-bulk-bar');
+    var selectedCountEl = document.getElementById('member-selected-count');
+    var bulkExtendModal = document.getElementById('bulk-extend-modal');
+    var bulkGradeModal = document.getElementById('bulk-grade-modal');
+    var bulkExtendHidden = document.getElementById('bulk-extend-hidden');
+    var bulkGradeHidden = document.getElementById('bulk-grade-hidden');
+    var bulkExtendCount = document.getElementById('bulk-extend-count');
+    var bulkGradeCount = document.getElementById('bulk-grade-count');
+
+    function getSelectedCheckboxes() {
+        return Array.prototype.filter.call(
+            document.querySelectorAll('.member-select:checked'),
+            function (cb) {
+                var row = cb.closest('.person-row');
+                return row && !row.classList.contains('hidden');
+            }
+        );
+    }
+
+    function syncBulkBar() {
+        var selected = getSelectedCheckboxes();
+        if (selectedCountEl) selectedCountEl.textContent = String(selected.length);
+        if (bulkBar) {
+            bulkBar.classList.toggle('hidden', selected.length === 0);
+            bulkBar.classList.toggle('flex', selected.length > 0);
+        }
+    }
+
+    function applyMemberFilters() {
+        var q = (filterQ && filterQ.value || '').toLowerCase().trim();
+        var status = filterStatus ? filterStatus.value : '';
+        var dept = filterDept ? filterDept.value : '';
+        document.querySelectorAll('.person-row').forEach(function (row) {
+            var ok = true;
+            if (status && row.getAttribute('data-status') !== status) ok = false;
+            if (dept && row.getAttribute('data-dept-id') !== dept) ok = false;
+            if (q) {
+                var name = row.getAttribute('data-name') || '';
+                if (name.indexOf(q) === -1) ok = false;
+            }
+            row.classList.toggle('hidden', !ok);
+        });
+        document.querySelectorAll('.dept-accordion-item').forEach(function (section) {
+            var hasVisible = false;
+            section.querySelectorAll('.person-row').forEach(function (row) {
+                if (!row.classList.contains('hidden')) hasVisible = true;
+            });
+            section.classList.toggle('hidden', !hasVisible);
+        });
+        if (exportLink) {
+            var params = new URLSearchParams();
+            if (status) params.set('status', status);
+            if (dept) params.set('dept', dept);
+            if (q) params.set('q', q);
+            var qs = params.toString();
+            exportLink.href = exportBase + (qs ? ('?' + qs) : '');
+        }
+        syncBulkBar();
+    }
+
+    function fillHiddenInputs(container, checkboxes, attr) {
+        if (!container) return;
+        container.innerHTML = '';
+        checkboxes.forEach(function (cb) {
+            if (attr && cb.getAttribute(attr) !== '1') return;
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'assignment_ids';
+            input.value = cb.value;
+            container.appendChild(input);
+        });
+    }
+
+    if (filterQ) filterQ.addEventListener('input', applyMemberFilters);
+    if (filterStatus) filterStatus.addEventListener('change', applyMemberFilters);
+    if (filterDept) filterDept.addEventListener('change', applyMemberFilters);
+    if (filterReset) {
+        filterReset.addEventListener('click', function () {
+            if (filterQ) filterQ.value = '';
+            if (filterStatus) filterStatus.value = '';
+            if (filterDept) filterDept.value = '';
+            applyMemberFilters();
+        });
+    }
+
+    document.querySelectorAll('.member-select').forEach(function (cb) {
+        cb.addEventListener('change', syncBulkBar);
+    });
+
+    var btnBulkClear = document.getElementById('btn-bulk-clear');
+    if (btnBulkClear) {
+        btnBulkClear.addEventListener('click', function () {
+            document.querySelectorAll('.member-select').forEach(function (cb) { cb.checked = false; });
+            syncBulkBar();
+        });
+    }
+
+    function toggleModal(modal, show) {
+        if (!modal) return;
+        modal.classList.toggle('hidden', !show);
+    }
+
+    var btnBulkExtend = document.getElementById('btn-bulk-extend');
+    if (btnBulkExtend) {
+        btnBulkExtend.addEventListener('click', function () {
+            var extendable = getSelectedCheckboxes().filter(function (cb) {
+                return cb.getAttribute('data-can-extend') === '1';
+            });
+            if (!extendable.length) {
+                alert('Chọn ít nhất một thành viên chưa hoàn thành để gia hạn.');
+                return;
+            }
+            fillHiddenInputs(bulkExtendHidden, extendable);
+            if (bulkExtendCount) bulkExtendCount.textContent = String(extendable.length);
+            toggleModal(bulkExtendModal, true);
+        });
+    }
+
+    var btnBulkGrade = document.getElementById('btn-bulk-grade');
+    if (btnBulkGrade) {
+        btnBulkGrade.addEventListener('click', function () {
+            var gradable = getSelectedCheckboxes().filter(function (cb) {
+                return cb.getAttribute('data-can-grade') === '1';
+            });
+            if (!gradable.length) {
+                alert('Chọn ít nhất một bản chờ nghiệm thu.');
+                return;
+            }
+            fillHiddenInputs(bulkGradeHidden, gradable);
+            if (bulkGradeCount) bulkGradeCount.textContent = String(gradable.length);
+            toggleModal(bulkGradeModal, true);
+        });
+    }
+
+    document.querySelectorAll('[data-close-bulk-extend]').forEach(function (el) {
+        el.addEventListener('click', function () { toggleModal(bulkExtendModal, false); });
+    });
+    document.querySelectorAll('[data-close-bulk-grade]').forEach(function (el) {
+        el.addEventListener('click', function () { toggleModal(bulkGradeModal, false); });
+    });
+
+    applyMemberFilters();
 
     var accordion = document.getElementById('dept-progress-accordion');
     if (accordion) {

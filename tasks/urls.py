@@ -27,6 +27,9 @@ urlpatterns = [
     path('manager/tasks/create/', views.manager_create_task, name='manager_create_task'),
     path('manager/tasks/manage/', views.manager_manage_tasks, name='manager_manage_tasks'),
     path('manager/tasks/<int:pk>/', views.manager_task_detail, name='manager_task_detail'),
+    path('manager/tasks/<int:pk>/export/', views.manager_task_export_excel, name='manager_task_export_excel'),
+    path('manager/tasks/<int:pk>/bulk-extend/', views.manager_task_bulk_extend, name='manager_task_bulk_extend'),
+    path('manager/tasks/<int:pk>/bulk-review/', views.manager_task_bulk_review, name='manager_task_bulk_review'),
     path(
         'manager/tasks/<int:pk>/assignments/<int:assignment_pk>/handover/',
         views.manager_task_handover,

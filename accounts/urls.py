@@ -30,4 +30,9 @@ urlpatterns = [
         name='department_remove_member',
     ),
     path('manager/staff/', views.manager_staff_list, name='manager_staff'),
+    path(
+        'manager/staff/import-template/',
+        views.manager_staff_import_template,
+        name='manager_staff_import_template',
+    ),
 ]
