@@ -2,8 +2,11 @@
 Django settings for EduEval — Hệ thống Đánh giá Hiệu quả Công việc.
 """
 
+import logging
 import os
 from pathlib import Path
+
+_settings_logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -134,6 +137,8 @@ MEDIA_ROOT = BASE_DIR / 'media'
 # ---------------------------------------------------------------------------
 # Media storage: local disk by default; Long Van S3 when USE_S3=1.
 # Static files stay on the server (PythonAnywhere static mapping / collectstatic).
+# If USE_S3=1 but django-storages is missing (wrong venv), fall back to local
+# media so pages with FileField do not crash with InvalidStorageError.
 # ---------------------------------------------------------------------------
 USE_S3 = os.environ.get('USE_S3', '0').lower() in ('1', 'true', 'yes', 'on')
 
@@ -164,9 +169,19 @@ STORAGES = {
 }
 
 if USE_S3:
-    STORAGES['default'] = {
-        'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage',
-    }
+    try:
+        import storages  # noqa: F401
+    except ImportError:
+        USE_S3 = False
+        _settings_logger.warning(
+            'USE_S3=1 nhưng chưa cài django-storages — dùng FileSystemStorage '
+            '(media local). Chạy: pip install -r requirements.txt trong đúng venv '
+            'của dự án DGVC (không dùng venv project khác).'
+        )
+    else:
+        STORAGES['default'] = {
+            'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage',
+        }
 
 # Cho phép nhúng media cùng origin (xem trước PDF trong Modal iframe)
 X_FRAME_OPTIONS = 'SAMEORIGIN'

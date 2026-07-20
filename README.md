@@ -11,6 +11,22 @@ Hệ thống đánh giá hiệu quả công việc.
 
 Folder `laravel/` (nếu còn) là bản scaffold dở — **bỏ qua**, dùng `edueval-laravel/`.
 
+## Chạy Django local
+
+Dùng **venv trong thư mục DGVC** (không dùng venv project khác như `education-blog/myVenv` — dễ thiếu `django-storages` và lỗi `InvalidStorageError`).
+
+```bash
+cd /path/to/DGVC
+python3 -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env       # chỉnh USE_S3 / secret nếu cần
+python manage.py migrate
+python manage.py runserver
+```
+
+Nếu `USE_S3=1` mà chưa cài `django-storages`, settings tự fallback sang media local (có warning trong log) thay vì crash trang.
+
 ## Deploy Django lên PythonAnywhere
 
 Xem mẫu WSGI: [`pythonanywhere_wsgi.py.example`](pythonanywhere_wsgi.py.example).

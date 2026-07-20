@@ -4,6 +4,7 @@ from io import BytesIO
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
@@ -101,14 +102,64 @@ def _is_direct_staff_assignee(assignment, user):
     return bool(dept and dept.leader_id == user.id)
 
 
+def _user_in_assignment_departments(user, assignment):
+    """
+    Thành viên tổ liên quan tới ĐÚNG bản phân công này (Kanban nội bộ).
+
+    Không mở rộng sang assignment anh/em của cùng batch task (mỗi tổ một bản nộp).
+    Không dùng primary/coordinating của Task — tránh tổ B mở bản nộp tổ A.
+    """
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+    member_dept_ids = set(
+        Department.objects.filter(
+            Q(members=user) | Q(leader=user),
+        ).values_list('pk', flat=True)
+    )
+    if not member_dept_ids:
+        return False
+
+    if assignment.assignee_department_id in member_dept_ids:
+        return True
+
+    if assignment.assignee_id and Department.objects.filter(
+        pk__in=member_dept_ids,
+    ).filter(
+        Q(members=assignment.assignee) | Q(leader=assignment.assignee),
+    ).exists():
+        return True
+
+    return False
+
+
+def _user_historically_related_to_task(user, task):
+    """
+    Liên quan lịch sử tới việc:
+    - người tạo task (created_by), hoặc
+    - từng tham gia (TaskParticipation), hoặc
+    - tạo sub-task / giao nội bộ (created_by của task con).
+    """
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+    if task.created_by_id == user.id:
+        return True
+    if task.participations.filter(user_id=user.id).exists():
+        return True
+    if Task.objects.filter(parent_task=task, created_by=user).exists():
+        return True
+    return False
+
+
 def _user_oversees_assignment(user, assignment):
     """
     Được xem chi tiết assignment nếu:
     - là assignee / trưởng tổ bản giao theo tổ, hoặc
     - Ban Giám đốc, hoặc
-    - Trưởng tổ Chủ trì/Phối hợp của task, hoặc
+    - Trưởng tổ Chủ trì/Phối hợp của task (hiện tại), hoặc
     - Trưởng tổ của tổ chứa người được giao (sau khi chuyển giao nội bộ), hoặc
-    - role Tổ chuyên môn tạo task / dẫn primary_department.
+    - người tạo task (created_by) — kể cả khi không còn là trưởng tổ / role Tổ, hoặc
+    - liên quan lịch sử (tham gia / tạo sub-task nội bộ), hoặc
+    - thành viên tổ liên quan đúng bản phân công (không sang bản nộp tổ khác).
     """
     if not user or not getattr(user, 'is_authenticated', False):
         return False
@@ -126,12 +177,15 @@ def _user_oversees_assignment(user, assignment):
     ).exists():
         return True
 
-    if getattr(user, 'is_department', False):
-        if task.created_by_id == user.id:
-            return True
-        primary = task.primary_department
-        if primary and primary.leader_id == user.id:
-            return True
+    primary = task.primary_department
+    if primary and primary.leader_id == user.id:
+        return True
+
+    if _user_historically_related_to_task(user, task):
+        return True
+
+    if _user_in_assignment_departments(user, assignment):
+        return True
 
     return False
 
@@ -139,16 +193,24 @@ def _user_oversees_assignment(user, assignment):
 def _get_staff_assignment(request, pk):
     """
     Resolve TaskAssignment cho staff detail.
-    Chấp nhận pk là TaskAssignment.id; nếu không khớp, thử pk là Task.id
+    Ưu tiên pk là TaskAssignment.id; nếu không khớp, thử pk là Task.id
     (link Kanban/nhầm id) rồi chọn assignment user được phép xem.
+
+    Assignment tồn tại nhưng không đủ quyền → 403 (không 404, không nhảy sang
+    bản nộp tổ khác trên cùng task). Chỉ 404 khi không có bản ghi tương ứng.
     """
     user = request.user
     qs = _assignment_detail_qs()
 
     assignment = qs.filter(pk=pk).first()
-    if assignment and _user_oversees_assignment(user, assignment):
-        return assignment
+    if assignment is not None:
+        if _user_oversees_assignment(user, assignment):
+            return assignment
+        raise PermissionDenied(
+            'Bạn không có quyền xem bản phân công này.'
+        )
 
+    # pk có thể là Task.id (link Kanban / nhầm id)
     task = Task.objects.filter(pk=pk).first()
     if task:
         candidates = list(qs.filter(task=task).order_by('pk'))
@@ -158,6 +220,10 @@ def _get_staff_assignment(request, pk):
         for candidate in candidates:
             if _user_oversees_assignment(user, candidate):
                 return candidate
+        if candidates:
+            raise PermissionDenied(
+                'Bạn không có quyền xem bản phân công này.'
+            )
 
     raise Http404('No TaskAssignment matches the given query.')
 

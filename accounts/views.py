@@ -399,6 +399,7 @@ def _department_task_action(task, user, department=None):
     is_dept_overseer = (
         user.is_department
         or (department is not None and department.leader_id == user.id)
+        or task.created_by_id == user.id
     )
     if is_dept_overseer:
         # Ưu tiên assignment của chính trưởng tổ; nếu đã chuyển giao → xem bản của thành viên.

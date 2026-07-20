@@ -410,7 +410,7 @@ class UnifiedAssignmentDashboardTestCase(TestCase):
         # Leader 2 không thao tác được assignment của tổ 1
         self.client.force_login(self.leader2)
         forbidden = self.client.get(reverse('staff_task_detail', kwargs={'pk': a1.pk}))
-        self.assertEqual(forbidden.status_code, 404)
+        self.assertEqual(forbidden.status_code, 403)
 
     def test_batch_departments_manage_members_and_subtasks_independently(self):
         member1 = User.objects.create_user(
@@ -1196,12 +1196,13 @@ class StaffTaskDetailOversightTestCase(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.context['can_update'])
 
-    def test_outsider_still_404(self):
+    def test_outsider_gets_403(self):
+        """Assignment tồn tại nhưng ngoài tổ → 403 (không 404)."""
         self.client.force_login(self.outsider)
         resp = self.client.get(
             reverse('staff_task_detail', kwargs={'pk': self.member_asg.pk})
         )
-        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.status_code, 403)
 
     def test_director_redirects_to_manager_task_detail(self):
         self.client.force_login(self.director)
@@ -1222,3 +1223,77 @@ class StaffTaskDetailOversightTestCase(TestCase):
             action['url'],
             reverse('staff_task_detail', args=[self.member_asg.pk]),
         )
+
+    def test_new_department_leader_after_handoff_can_open_task(self):
+        """Trưởng tổ mới (đổi trên form Tổ) vẫn mở được việc nội bộ."""
+        new_leader = User.objects.create_user(
+            username='new_leader',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='Trưởng',
+            last_name='Mới',
+        )
+        self.dept.members.add(new_leader)
+        self.dept.leader = new_leader
+        self.dept.save(update_fields=['leader'])
+
+        self.client.force_login(new_leader)
+        resp = self.client.get(
+            reverse('staff_task_detail', kwargs={'pk': self.member_asg.pk})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, self.task.title)
+
+    def test_former_leader_still_member_can_view_after_handoff(self):
+        """Trưởng tổ cũ (đã chuyển quyền) vẫn xem việc tổ nếu còn trong tổ."""
+        new_leader = User.objects.create_user(
+            username='new_leader2',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='Trưởng',
+            last_name='Khác',
+        )
+        self.dept.members.add(new_leader)
+        self.dept.leader = new_leader
+        self.dept.save(update_fields=['leader'])
+
+        self.client.force_login(self.leader)
+        resp = self.client.get(
+            reverse('staff_task_detail', kwargs={'pk': self.member_asg.pk})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, self.task.title)
+
+    def test_former_leader_creator_demoted_can_open_task(self):
+        """
+        Tổ trưởng cũ: đã tạo việc, không còn là dept.leader, không phải assignee,
+        role đã hạ xuống staff → vẫn GET staff_task_detail 200 (qua created_by).
+        """
+        new_leader = User.objects.create_user(
+            username='new_leader3',
+            password='x',
+            role=User.ROLE_DEPARTMENT,
+            first_name='Trưởng',
+            last_name='Mới',
+        )
+        self.dept.members.add(new_leader)
+        self.dept.leader = new_leader
+        self.dept.save(update_fields=['leader'])
+
+        # Hạ role + rời tổ để chỉ còn quyền qua created_by (không nhờ member/leader).
+        self.dept.members.remove(self.leader)
+        self.leader.role = User.ROLE_STAFF
+        self.leader.save(update_fields=['role'])
+        self.assertFalse(self.leader.is_department)
+        self.assertNotEqual(self.dept.leader_id, self.leader.id)
+        self.assertNotEqual(self.member_asg.assignee_id, self.leader.id)
+        self.assertEqual(self.task.created_by_id, self.leader.id)
+
+        self.client.force_login(self.leader)
+        resp = self.client.get(
+            reverse('staff_task_detail', kwargs={'pk': self.member_asg.pk})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, self.task.title)
+        # Chỉ xem oversight — không cập nhật tiến độ thay thành viên
+        self.assertFalse(resp.context['can_update'])
