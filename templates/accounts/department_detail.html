@@ -6,35 +6,33 @@
 <div class="max-w-6xl mx-auto space-y-5">
 
     {# ── Header card ── #}
-    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 sm:p-6">
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div class="min-w-0">
-                <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">Workspace nội bộ</p>
-                <h1 class="text-2xl font-bold text-gray-900 mt-1 flex items-center gap-2.5">
-                    <span class="inline-flex items-center justify-center w-10 h-10 rounded-xl {{ department.badge_classes }} ring-1 ring-inset shrink-0">
-                        <i class="fas fa-briefcase"></i>
-                    </span>
-                    <span class="truncate">{{ department.name }}</span>
-                </h1>
-                <p class="text-sm text-gray-500 mt-1.5">
-                    <i class="fas fa-user-friends text-gray-400 mr-1"></i>
-                    {{ members_count }} thành viên
-                    {% if department.leader %}
-                    <span class="mx-1.5 text-gray-300">·</span>
-                    <i class="fas fa-crown text-amber-500 mr-1"></i>
-                    Trưởng tổ: <strong class="text-gray-700">{{ department.leader }}</strong>
-                    {% endif %}
-                </p>
-            </div>
-            {% if request.user.is_department or request.user.is_director %}
-            <button type="button" id="btn-open-assign-modal"
-                    class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold
-                           bg-primary text-white hover:bg-blue-800 shadow-sm transition-colors shrink-0">
-                <i class="fas fa-plus"></i>
-                Giao việc nội bộ
-            </button>
-            {% endif %}
+    <div class="bg-white rounded-2xl shadow-sm p-6 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div class="min-w-0">
+            <p class="text-xs font-semibold uppercase tracking-wider text-gray-400">Workspace nội bộ</p>
+            <h1 class="text-2xl font-bold text-gray-900 mt-1 flex items-center gap-2.5">
+                <span class="inline-flex items-center justify-center w-10 h-10 rounded-xl {{ department.badge_classes }} ring-1 ring-inset shrink-0">
+                    <i class="fas fa-briefcase"></i>
+                </span>
+                <span class="truncate">{{ department.name }}</span>
+            </h1>
+            <p class="text-sm text-gray-500 mt-1.5">
+                <i class="fas fa-user-friends text-gray-400 mr-1"></i>
+                {{ members_count }} thành viên
+                {% if department.leader %}
+                <span class="mx-1.5 text-gray-300">·</span>
+                <i class="fas fa-crown text-amber-500 mr-1"></i>
+                Trưởng tổ: <strong class="text-gray-700">{{ department.leader }}</strong>
+                {% endif %}
+            </p>
         </div>
+        {% if request.user.role == 'department' or request.user.is_director or request.user.is_department %}
+        <button type="button" id="btn-open-assign-modal"
+                class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold
+                       bg-primary text-white hover:bg-blue-800 shadow-sm transition-colors shrink-0">
+            <i class="fas fa-plus"></i>
+            Giao việc nội bộ
+        </button>
+        {% endif %}
     </div>
 
     {# ── Quick stats ── #}

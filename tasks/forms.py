@@ -259,7 +259,11 @@ class DepartmentTaskAssignForm(forms.ModelForm):
         widget=MultipleFileInput(
             attrs={
                 'id': 'id_dept_attachments',
-                'class': 'hidden',
+                'class': (
+                    'block w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-3 '
+                    'file:rounded-lg file:border-0 file:text-sm file:font-medium '
+                    'file:bg-blue-50 file:text-primary hover:file:bg-blue-100'
+                ),
                 'multiple': True,
             }
         ),

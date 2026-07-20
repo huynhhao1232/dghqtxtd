@@ -433,7 +433,11 @@ def department_interaction(request, dept_id):
     if not department.user_can_access(request.user):
         raise PermissionDenied('Bạn không có quyền truy cập khu vực nhóm này.')
 
-    can_assign = request.user.is_director or request.user.is_department
+    can_assign = (
+        request.user.is_director
+        or request.user.is_department
+        or getattr(request.user, 'role', None) == User.ROLE_DEPARTMENT
+    )
     assign_form = DepartmentTaskAssignForm(
         department=department,
         user=request.user,
