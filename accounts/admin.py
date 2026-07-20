@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import ChatMessage, Department, GroupPost, User
+from .models import Department, GroupPost, User
 
 
 @admin.register(Department)
@@ -19,14 +19,6 @@ class GroupPostAdmin(admin.ModelAdmin):
     search_fields = ('content', 'author__username', 'author__first_name')
     autocomplete_fields = ('department', 'author')
 
-
-@admin.register(ChatMessage)
-class ChatMessageAdmin(admin.ModelAdmin):
-    list_display = ('department', 'user', 'created_at')
-    list_filter = ('department',)
-    search_fields = ('text', 'user__username', 'user__first_name')
-    autocomplete_fields = ('department', 'user')
-    readonly_fields = ('created_at',)
 
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):

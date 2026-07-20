@@ -61,14 +61,12 @@ elif not DEBUG:
     ]
 
 INSTALLED_APPS = [
-    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'channels',
     'accounts.apps.AccountsConfig',
     'tasks.apps.TasksConfig',
 ]
@@ -103,20 +101,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'edueval.wsgi.application'
-ASGI_APPLICATION = 'edueval.asgi.application'
-
-# Redis channel layer for Django Channels (group chat WebSockets).
-# Local: redis-server / brew services start redis
-# Production: set REDIS_URL, run Daphne/Uvicorn (not gunicorn alone).
-REDIS_URL = os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0')
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            'hosts': [REDIS_URL],
-        },
-    },
-}
 
 # SQLite is fine on PythonAnywhere free tier (file under project root).
 DATABASES = {
@@ -199,9 +183,6 @@ elif _cookie_secure in ('0', 'false', 'no', 'off'):
 elif not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-else:
-    SESSION_COOKIE_SECURE = False
-    CSRF_COOKIE_SECURE = False
 
 if SESSION_COOKIE_SECURE or CSRF_COOKIE_SECURE:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

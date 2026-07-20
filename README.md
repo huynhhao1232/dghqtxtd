@@ -11,46 +11,10 @@ Hệ thống đánh giá hiệu quả công việc.
 
 Folder `laravel/` (nếu còn) là bản scaffold dở — **bỏ qua**, dùng `edueval-laravel/`.
 
-## Chat nhóm thời gian thực (Django Channels)
-
-Trang **Khu vực nhóm** (`/departments/<id>/interaction/`) có khung **Chat nhóm** (WebSocket).
-
-**Yêu cầu:** Redis đang chạy (channel layer).
-
-```bash
-# macOS
-brew services start redis
-# hoặc
-redis-server
-
-# Cài dependency
-pip install -r requirements.txt
-python manage.py migrate
-
-# Chạy ASGI (WebSocket). Gunicorn WSGI thuần KHÔNG phục vụ WS.
-daphne -b 0.0.0.0 -p 8000 edueval.asgi:application
-# hoặc (dev):
-python manage.py runserver
-```
-
-Biến môi trường: `REDIS_URL` (mặc định `redis://127.0.0.1:6379/0`).
-
-**Production (VPS):** dùng **Daphne** (hoặc Uvicorn) làm process ASGI sau Nginx (proxy `Upgrade`/`Connection` cho `/ws/`). Có thể giữ Gunicorn chỉ cho HTTP nếu tách service — đơn giản nhất là một process Daphne cho cả HTTP + WebSocket.
-
-```bash
-# Ví dụ trên VPS
-sudo apt install -y redis-server
-pip install -r requirements.txt
-python manage.py migrate
-daphne -b 127.0.0.1 -p 8000 edueval.asgi:application
-```
-
 ## Deploy Django lên PythonAnywhere
 
 Xem mẫu WSGI: [`pythonanywhere_wsgi.py.example`](pythonanywhere_wsgi.py.example).
 Biến môi trường: `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`, `DJANGO_SECRET_KEY`, `DJANGO_CSRF_TRUSTED_ORIGINS`.
-
-> **Lưu ý:** PythonAnywhere free không hỗ trợ WebSocket / Daphne như VPS. Chat realtime cần VPS (ví dụ dghqcvtxtd.site) với Redis + Daphne.
 
 ```bash
 # Trên Bash console PA (sau khi upload/clone vào ~/DGVC)
@@ -91,13 +55,6 @@ python manage.py check_s3 --create-bucket  # tạo nếu gói còn slot
 | `AWS_S3_ADDRESSING_STYLE` | `path` |
 
 Kiểm tra kết nối: `python manage.py check_s3` (tương đương `aws s3 ls` + kiểm tra bucket).
-
-**PythonAnywhere free:** outbound HTTP đi qua proxy allowlist. Host Long Van
-`s3-hcm5-r1.longvan.net` thường **không** nằm trong danh sách → upload đính kèm
-gây `ProxyConnectionError` / `Tunnel connection failed: 403 Forbidden` (HTTP 500
-khi tạo công việc có file). Trên PA free hãy để `USE_S3=0` trong WSGI (xem
-`pythonanywhere_wsgi.py.example`) để media lưu local (`/media/` → `~/DGVC/media`).
-Muốn dùng S3 trên PA: nâng cấp tài khoản **hoặc** [xin thêm host vào allowlist](https://help.pythonanywhere.com/pages/RequestingAllowlistAdditions/).
 
 ## Chạy Laravel
 

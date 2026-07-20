@@ -12,11 +12,6 @@ urlpatterns = [
         views.department_interaction,
         name='department_interaction',
     ),
-    path(
-        'departments/<int:dept_id>/chat/messages/',
-        views.department_chat_messages,
-        name='department_chat_messages',
-    ),
     # Manager org management
     path('manager/departments/', views.manager_departments, name='manager_departments'),
     path(
