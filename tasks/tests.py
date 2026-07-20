@@ -308,6 +308,67 @@ class SubtaskWBSTestCase(TestCase):
             ).exists()
         )
 
+    def test_department_all_members_creates_one_task_per_member(self):
+        """Mỗi thành viên tự thực hiện → N task cá nhân, không giao Chủ trì–Phối hợp."""
+        self.client.force_login(self.manager)
+        base_title = 'Nộp sổ chủ nhiệm'
+        response = self.client.post(reverse('manager_create_task'), {
+            'title': base_title,
+            'description': 'Mỗi GV nộp riêng',
+            'deadline': self.parent.deadline.isoformat(),
+            'cycle': Task.CYCLE_MONTH,
+            'assign_mode': 'department',
+            'primary_department': self.dept.pk,
+            'department_execution_mode': 'all_members',
+        })
+        self.assertEqual(response.status_code, 302)
+
+        members = [self.leader, self.member1, self.member2]
+        tasks = list(Task.objects.filter(title__startswith=f'{base_title} - ['))
+        self.assertEqual(len(tasks), 3)
+        self.assertTrue(all(t.primary_department_id is None for t in tasks))
+        self.assertTrue(all(not t.is_team_task for t in tasks))
+
+        for member in members:
+            display = str(member).strip() or member.username
+            expected_title = f'{base_title} - [{display}]'
+            task = Task.objects.get(title=expected_title)
+            assignment = task.assignments.get()
+            self.assertEqual(assignment.assignee_id, member.pk)
+            self.assertIsNone(assignment.assignee_department_id)
+            self.assertTrue(
+                Notification.objects.filter(
+                    recipient=member,
+                    related_task=task,
+                    message=f'Bạn được phân công công việc mới: {expected_title}',
+                ).exists()
+            )
+
+        # Không tạo assignment kiểu tổ / chỉ trưởng tổ nhận một task chung
+        self.assertFalse(
+            Task.objects.filter(title=base_title, primary_department=self.dept).exists()
+        )
+
+    def test_department_leader_coordinate_keeps_existing_flow(self):
+        """Mặc định / leader_coordinate → giao Trưởng tổ Chủ trì như cũ."""
+        self.client.force_login(self.manager)
+        title = 'Họp tổ chuyên môn'
+        response = self.client.post(reverse('manager_create_task'), {
+            'title': title,
+            'description': 'Trưởng tổ điều phối',
+            'deadline': self.parent.deadline.isoformat(),
+            'cycle': Task.CYCLE_MONTH,
+            'assign_mode': 'department',
+            'primary_department': self.dept.pk,
+            'department_execution_mode': 'leader_coordinate',
+        })
+        self.assertEqual(response.status_code, 302)
+        task = Task.objects.get(title=title)
+        self.assertEqual(task.primary_department_id, self.dept.pk)
+        self.assertTrue(task.is_team_task)
+        self.assertEqual(task.assignments.count(), 1)
+        self.assertEqual(task.assignments.get().assignee_id, self.leader.pk)
+
 
 class UnifiedAssignmentDashboardTestCase(TestCase):
     def setUp(self):

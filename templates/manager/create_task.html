@@ -108,7 +108,46 @@
                         </p>
                         {% for e in form.primary_department.errors %}<p class="mt-1 text-xs text-red-600">{{ e }}</p>{% endfor %}
                     </div>
-                    <div>
+
+                    <!-- Cách thức thực hiện — chỉ hiện khi giao Tổ/Nhóm -->
+                    <div id="dept-execution-mode">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">
+                            Cách thức thực hiện
+                            <span class="text-gray-400 font-normal">(tùy chọn)</span>
+                        </label>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" id="exec-mode-cards">
+                            <label class="exec-mode-card relative flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition
+                                          border-blue-400 bg-blue-50/80"
+                                   data-exec="leader_coordinate">
+                                <input type="radio" name="department_execution_mode" value="leader_coordinate"
+                                       class="sr-only exec-mode-radio"
+                                       {% if form.department_execution_mode.value != 'all_members' %}checked{% endif %}>
+                                <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white border border-blue-100 text-primary">
+                                    <i class="fas fa-user-tie"></i>
+                                </span>
+                                <span class="min-w-0">
+                                    <span class="block text-sm font-semibold text-gray-900">Giao cho Trưởng tổ điều phối</span>
+                                    <span class="block text-xs text-gray-500 mt-0.5">Tổ/Trưởng tổ nhận việc và phân công lại thành viên.</span>
+                                </span>
+                            </label>
+                            <label class="exec-mode-card relative flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition
+                                          border-gray-200 bg-white hover:border-gray-300"
+                                   data-exec="all_members">
+                                <input type="radio" name="department_execution_mode" value="all_members"
+                                       class="sr-only exec-mode-radio"
+                                       {% if form.department_execution_mode.value == 'all_members' %}checked{% endif %}>
+                                <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gray-50 border border-gray-100 text-gray-600">
+                                    <i class="fas fa-users"></i>
+                                </span>
+                                <span class="min-w-0">
+                                    <span class="block text-sm font-semibold text-gray-900">Mỗi thành viên tự thực hiện</span>
+                                    <span class="block text-xs text-gray-500 mt-0.5">Tạo một nhiệm vụ riêng cho từng thành viên trong tổ.</span>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div id="coord-section">
                         <label class="block text-sm font-medium text-gray-700 mb-1.5">
                             <i class="fas fa-handshake text-emerald-600 mr-1"></i> Đơn vị Phối hợp
                         </label>
@@ -211,7 +250,53 @@
         panelIndividual.classList.toggle('hidden', m !== 'individual');
         panelDepartment.classList.toggle('hidden', m !== 'department');
         panelBatchDepartment.classList.toggle('hidden', m !== 'batch_department');
+        syncExecModeUI();
     }
+
+    // ── Cách thức thực hiện (chỉ panel Tổ/Nhóm) ──
+    var execCards = document.querySelectorAll('.exec-mode-card');
+    var execRadios = document.querySelectorAll('.exec-mode-radio');
+    var coordSection = document.getElementById('coord-section');
+
+    function currentExecMode() {
+        var checked = document.querySelector('.exec-mode-radio:checked');
+        return checked ? checked.value : 'leader_coordinate';
+    }
+
+    function syncExecModeUI() {
+        var exec = currentExecMode();
+        execCards.forEach(function (card) {
+            var active = card.getAttribute('data-exec') === exec;
+            card.className = 'exec-mode-card relative flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition ' +
+                (active
+                    ? 'border-blue-400 bg-blue-50/80'
+                    : 'border-gray-200 bg-white hover:border-gray-300');
+            var iconWrap = card.querySelector('span.flex.h-10');
+            if (iconWrap) {
+                iconWrap.className = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ' +
+                    (active
+                        ? 'bg-white border-blue-100 text-primary'
+                        : 'bg-gray-50 border-gray-100 text-gray-600');
+            }
+        });
+        if (coordSection) {
+            // Phối hợp chỉ áp dụng khi Trưởng tổ điều phối
+            coordSection.classList.toggle('hidden', mode !== 'department' || exec === 'all_members');
+        }
+    }
+
+    execRadios.forEach(function (radio) {
+        radio.addEventListener('change', syncExecModeUI);
+    });
+    execCards.forEach(function (card) {
+        card.addEventListener('click', function () {
+            var val = card.getAttribute('data-exec');
+            execRadios.forEach(function (r) {
+                r.checked = (r.value === val);
+            });
+            syncExecModeUI();
+        });
+    });
 
     tabs.forEach(function (btn) {
         btn.addEventListener('click', function () {
