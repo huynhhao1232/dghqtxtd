@@ -935,80 +935,130 @@ def manager_dashboard(request):
     )
 
 
+def _storage_upload_error_message(exc):
+    """Human-readable hint when media storage (esp. S3 / Long Van) fails."""
+    name = type(exc).__name__
+    text = str(exc)
+    low = text.lower()
+    if 'InvalidAccessKeyId' in text or 'SignatureDoesNotMatch' in text or 'InvalidAccessKey' in text:
+        return (
+            'Không lưu được file đính kèm: Access Key Long Van S3 không hợp lệ '
+            '(InvalidAccessKeyId). Cần tạo lại AccessKey/SecretKey trên Long Van, '
+            'cập nhật .env rồi restart edueval — hoặc tạm đặt USE_S3=0 để lưu media trên VPS.'
+        )
+    if 'NoSuchBucket' in text:
+        return (
+            'Không lưu được file đính kèm: bucket S3 chưa tồn tại. '
+            'Kiểm tra AWS_STORAGE_BUCKET_NAME hoặc chạy manage.py check_s3 --create-bucket.'
+        )
+    if 'ProxyConnectionError' in name or 'proxy' in low or (
+        '403 Forbidden' in text and 'Proxy' in name
+    ):
+        return (
+            'Không lưu được file đính kèm lên S3 (proxy PythonAnywhere chặn host Long Van). '
+            'Trên tài khoản PA free hãy đặt USE_S3=0 trong WSGI hoặc xin allowlist '
+            's3-hcm5-r1.longvan.net. Chi tiết kỹ thuật đã ghi vào error log.'
+        )
+    if 'ClientError' in name or '403 Forbidden' in text or 'Forbidden' in text:
+        return (
+            'Không lưu được file đính kèm lên S3 (403/Forbidden). '
+            'Kiểm tra quyền AccessKey trên bucket Long Van, hoặc tạm USE_S3=0 trên VPS. '
+            f'Chi tiết: {exc}'
+        )
+    return f'Không lưu được file đính kèm: {exc}'
+
+
 @manager_required
 @require_http_methods(['GET', 'POST'])
 def manager_create_task(request):
     form = TaskCreateForm(request.POST or None, request.FILES or None)
     if request.method == 'POST' and form.is_valid():
         mode = form.cleaned_data['assign_mode']
-        if mode == TaskCreateForm.ASSIGN_BATCH_DEPARTMENT:
-            departments = list(form.cleaned_data['batch_departments'])
-            attachments = form.cleaned_data.get('attachments') or []
-            with transaction.atomic():
-                task = Task.objects.create(
-                    title=form.cleaned_data['title'],
-                    description=form.cleaned_data['description'],
-                    deadline=form.cleaned_data['deadline'],
-                    cycle=form.cleaned_data['cycle'],
-                    created_by=request.user,
-                    primary_department=None,
+        try:
+            if mode == TaskCreateForm.ASSIGN_BATCH_DEPARTMENT:
+                departments = list(form.cleaned_data['batch_departments'])
+                attachments = form.cleaned_data.get('attachments') or []
+                with transaction.atomic():
+                    task = Task.objects.create(
+                        title=form.cleaned_data['title'],
+                        description=form.cleaned_data['description'],
+                        deadline=form.cleaned_data['deadline'],
+                        cycle=form.cleaned_data['cycle'],
+                        created_by=request.user,
+                        primary_department=None,
+                    )
+                    for uploaded_file in attachments:
+                        try:
+                            uploaded_file.seek(0)
+                        except (AttributeError, ValueError):
+                            pass
+                        TaskAttachment.objects.create(
+                            task=task,
+                            file=uploaded_file,
+                            original_name=uploaded_file.name,
+                            file_size=uploaded_file.size,
+                        )
+                    for dept in departments:
+                        assignment = TaskAssignment(
+                            task=task,
+                            assignee_department=dept,
+                        )
+                        assignment._batch_department_assignment = True
+                        assignment.save()
+
+                messages.success(
+                    request,
+                    f'Đã giao nhiệm vụ chung "{task.title}" cho {len(departments)} Tổ/Nhóm '
+                    f'(mỗi tổ một bản nộp độc lập).',
                 )
-                for uploaded_file in attachments:
-                    try:
-                        uploaded_file.seek(0)
-                    except (AttributeError, ValueError):
-                        pass
-                    TaskAttachment.objects.create(
-                        task=task,
-                        file=uploaded_file,
-                        original_name=uploaded_file.name,
-                        file_size=uploaded_file.size,
-                    )
-                for dept in departments:
-                    assignment = TaskAssignment(
-                        task=task,
-                        assignee_department=dept,
-                    )
-                    assignment._batch_department_assignment = True
-                    assignment.save()
+                return redirect('manager_task_detail', pk=task.pk)
 
-            messages.success(
-                request,
-                f'Đã giao nhiệm vụ chung "{task.title}" cho {len(departments)} Tổ/Nhóm '
-                f'(mỗi tổ một bản nộp độc lập).',
-            )
-            return redirect('manager_task_detail', pk=task.pk)
-
-        task = form.save(commit=False)
-        task.created_by = request.user
-        task.primary_department = form.cleaned_data.get('primary_department')
-        task.save()
-        coords = form.cleaned_data.get('coordinating_departments') or []
-        if coords:
-            task.coordinating_departments.set(coords)
-        for f in form.cleaned_data.get('attachments') or []:
-            TaskAttachment.objects.create(
-                task=task,
-                file=f,
-                original_name=f.name,
-                file_size=f.size,
-            )
-        assignees = form.cleaned_data['assignees']
-        count = 0
-        for user in assignees:
-            _, created = TaskAssignment.objects.get_or_create(task=task, assignee=user)
-            if created:
-                count += 1
-        if mode == TaskCreateForm.ASSIGN_DEPARTMENT and task.primary_department:
-            coord_names = ', '.join(d.name for d in task.coordinating_departments.all()) or 'không'
-            messages.success(
-                request,
-                f'Đã giao việc "{task.title}" — Chủ trì: {task.primary_department.name}; '
-                f'Phối hợp: {coord_names} ({count} trưởng tổ nhận việc).',
-            )
-        else:
-            messages.success(request, f'Đã giao việc "{task.title}" cho {count} nhân viên.')
-        return redirect('manager_create_task')
+            task = form.save(commit=False)
+            task.created_by = request.user
+            task.primary_department = form.cleaned_data.get('primary_department')
+            task.save()
+            coords = form.cleaned_data.get('coordinating_departments') or []
+            if coords:
+                task.coordinating_departments.set(coords)
+            for f in form.cleaned_data.get('attachments') or []:
+                TaskAttachment.objects.create(
+                    task=task,
+                    file=f,
+                    original_name=f.name,
+                    file_size=f.size,
+                )
+            assignees = form.cleaned_data['assignees']
+            count = 0
+            for user in assignees:
+                _, created = TaskAssignment.objects.get_or_create(task=task, assignee=user)
+                if created:
+                    count += 1
+            if mode == TaskCreateForm.ASSIGN_DEPARTMENT and task.primary_department:
+                coord_names = ', '.join(d.name for d in task.coordinating_departments.all()) or 'không'
+                messages.success(
+                    request,
+                    f'Đã giao việc "{task.title}" — Chủ trì: {task.primary_department.name}; '
+                    f'Phối hợp: {coord_names} ({count} trưởng tổ nhận việc).',
+                )
+            else:
+                messages.success(request, f'Đã giao việc "{task.title}" cho {count} nhân viên.')
+            return redirect('manager_create_task')
+        except OSError as exc:
+            messages.error(request, _storage_upload_error_message(exc))
+        except Exception as exc:
+            # botocore ClientError / ProxyConnectionError and other storage backends
+            mod = type(exc).__module__ or ''
+            name = type(exc).__name__
+            if (
+                'Proxy' in name
+                or 'ClientError' in name
+                or 'Boto' in mod
+                or 'botocore' in mod
+                or 'storages' in mod
+            ):
+                messages.error(request, _storage_upload_error_message(exc))
+            else:
+                raise
 
     options = []
     for u in User.objects.filter(is_manager=False, is_active=True).prefetch_related('my_departments'):
