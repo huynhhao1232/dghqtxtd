@@ -1172,7 +1172,9 @@ def manager_create_task(request):
                 # Giao đồng loạt — mỗi thành viên tự thực hiện: 1 Task + 1 Assignment / người
                 if exec_mode == TaskAssignForm.EXEC_ALL_MEMBERS:
                     members = list(form.cleaned_data['assignees'])
+                    member_dept_map = form.cleaned_data.get('member_department_map') or {}
                     base_title = form.cleaned_data['title']
+                    batch_key = Task.new_batch_key()
                     first_task = None
                     with transaction.atomic():
                         for member in members:
@@ -1184,6 +1186,8 @@ def manager_create_task(request):
                                 cycle=form.cleaned_data['cycle'],
                                 created_by=request.user,
                                 primary_department=None,
+                                batch_key=batch_key,
+                                source_department=member_dept_map.get(member.pk),
                             )
                             for uploaded_file in attachments:
                                 try:
@@ -1440,6 +1444,439 @@ def _enrich_task_row(task, today):
     return task
 
 
+def _status_aggregate(statuses):
+    """(done, total, pct, display_status) từ danh sách status assignment."""
+    total = len(statuses)
+    if not total:
+        return 0, 0, 0, TaskAssignment.STATUS_TODO
+    done = sum(1 for s in statuses if s == TaskAssignment.STATUS_COMPLETED)
+    pct = int(round((done / total) * 100))
+    if TaskAssignment.STATUS_PENDING in statuses:
+        display = TaskAssignment.STATUS_PENDING
+    elif TaskAssignment.STATUS_REDO in statuses or TaskAssignment.STATUS_IN_PROGRESS in statuses:
+        display = TaskAssignment.STATUS_IN_PROGRESS
+    elif done == total:
+        display = TaskAssignment.STATUS_COMPLETED
+    elif all(s == TaskAssignment.STATUS_TODO for s in statuses):
+        display = TaskAssignment.STATUS_TODO
+    else:
+        display = TaskAssignment.STATUS_IN_PROGRESS
+    return done, total, pct, display
+
+
+def _person_leaf_from_assignment(assignment, task, today):
+    status = assignment.status
+    is_overdue = (
+        task.deadline < today and status != TaskAssignment.STATUS_COMPLETED
+    )
+    return {
+        'name': assignment.target_display_name,
+        'avatar_url': assignment.target_avatar_url,
+        'status': status,
+        'status_label': STATUS_LABELS.get(status, status),
+        'status_pill': STATUS_PILL.get(status, STATUS_PILL[TaskAssignment.STATUS_TODO]),
+        'deadline': task.deadline,
+        'is_overdue': is_overdue,
+        'task': task,
+        'assignment': assignment,
+        'detail_url': reverse('manager_task_detail', kwargs={'pk': task.pk}),
+    }
+
+
+def _person_leaf_from_participation(part, task, today):
+    """Thành viên tham gia (chưa có assignment cá nhân) — trạng thái theo đánh giá nội bộ."""
+    if part.evaluation == TaskParticipation.EVAL_DAT:
+        status = TaskAssignment.STATUS_COMPLETED
+    elif part.evaluation in (
+        TaskParticipation.EVAL_CHO_LAM_LAI,
+        TaskParticipation.EVAL_TRE_BI_TRU_DIEM,
+    ):
+        status = TaskAssignment.STATUS_REDO
+    else:
+        status = TaskAssignment.STATUS_IN_PROGRESS
+    is_overdue = (
+        task.deadline < today and status != TaskAssignment.STATUS_COMPLETED
+    )
+    user = part.user
+    return {
+        'name': str(user),
+        'avatar_url': user.avatar_url if user else '',
+        'status': status,
+        'status_label': STATUS_LABELS.get(status, status),
+        'status_pill': STATUS_PILL.get(status, STATUS_PILL[TaskAssignment.STATUS_TODO]),
+        'deadline': task.deadline,
+        'is_overdue': is_overdue,
+        'task': task,
+        'assignment': None,
+        'detail_url': reverse('manager_task_detail', kwargs={'pk': task.pk}),
+    }
+
+
+def _dept_node(dept, people, badge_classes=None):
+    statuses = [p['status'] for p in people]
+    done, total, pct, display = _status_aggregate(statuses)
+    return {
+        'id': getattr(dept, 'pk', None) or 0,
+        'name': getattr(dept, 'name', None) or 'Khác',
+        'badge_classes': badge_classes or getattr(dept, 'badge_classes', None) or (
+            'bg-slate-100 text-slate-700 ring-slate-500/20'
+        ),
+        'done': done,
+        'total': total,
+        'pct': pct,
+        'display_status': display,
+        'display_status_label': STATUS_LABELS.get(display, display),
+        'display_status_pill': STATUS_PILL.get(display, STATUS_PILL[TaskAssignment.STATUS_TODO]),
+        'people': people,
+    }
+
+
+def _tree_node_meta(title, departments, today, deadline, task=None, node_id=None, kind='tree'):
+    all_people = [p for d in departments for p in d['people']]
+    statuses = [p['status'] for p in all_people]
+    done, total, pct, display = _status_aggregate(statuses)
+    is_overdue = deadline < today and display != TaskAssignment.STATUS_COMPLETED
+    return {
+        'kind': kind,
+        'is_flat': False,
+        'node_id': node_id or (f'task-{task.pk}' if task else title),
+        'title': title,
+        'task': task,
+        'deadline': deadline,
+        'row_is_overdue': is_overdue,
+        'done': done,
+        'total': total,
+        'pct': pct,
+        'progress_label': f'{done}/{total} xong' if total else 'Chưa có thành viên',
+        'display_status': display,
+        'display_status_label': STATUS_LABELS.get(display, display),
+        'display_status_pill': STATUS_PILL.get(display, STATUS_PILL[TaskAssignment.STATUS_TODO]),
+        'departments': departments,
+        'cycle_display': task.get_cycle_display() if task else '',
+        'description': (task.description if task else '') or '',
+    }
+
+
+def _build_batch_tree_node(member_tasks, today):
+    """L1 batch → L2 tổ nguồn → L3 task cá nhân."""
+    if not member_tasks:
+        return None
+    enriched = [_enrich_task_row(t, today) for t in member_tasks]
+    title = enriched[0].batch_display_title
+    by_dept = {}
+    orphan_people = []
+    for task in enriched:
+        assignment = next(iter(task.assignments.all()), None)
+        if not assignment:
+            continue
+        person = _person_leaf_from_assignment(assignment, task, today)
+        dept = task.source_department
+        if dept is None and assignment.assignee_id:
+            dept = assignment.assignee.primary_department
+        if dept is None:
+            orphan_people.append(person)
+            continue
+        by_dept.setdefault(dept.pk, {'dept': dept, 'people': []})
+        by_dept[dept.pk]['people'].append(person)
+
+    departments = [
+        _dept_node(entry['dept'], entry['people'])
+        for entry in sorted(by_dept.values(), key=lambda e: e['dept'].name)
+    ]
+    if orphan_people:
+        departments.append(
+            _dept_node(
+                type('D', (), {'pk': 0, 'name': 'Khác', 'badge_classes': (
+                    'bg-slate-100 text-slate-700 ring-slate-500/20'
+                )})(),
+                orphan_people,
+            )
+        )
+
+    # Anchor task = mới nhất (để gia hạn/xóa không áp dụng hàng loạt trên L1)
+    anchor = max(enriched, key=lambda t: t.created_at)
+    batch_key = str(anchor.batch_key) if anchor.batch_key else f'batch-{anchor.pk}'
+    node = _tree_node_meta(
+        title,
+        departments,
+        today,
+        deadline=min(t.deadline for t in enriched),
+        task=None,
+        node_id=f'batch-{batch_key}',
+        kind='batch',
+    )
+    node['member_tasks'] = enriched
+    node['cycle_display'] = anchor.get_cycle_display()
+    node['description'] = anchor.description or ''
+    return node
+
+
+def _build_team_tree_node(task, today):
+    """Chủ trì — Phối hợp: L1 task → L2 tổ → L3 thành viên / trưởng tổ."""
+    task = _enrich_task_row(task, today)
+    departments = []
+    parts = list(task.participations.all())
+    parts_by_dept = {}
+    for part in parts:
+        key = part.department_id or 0
+        parts_by_dept.setdefault(key, []).append(part)
+
+    if task.primary_department:
+        dept = task.primary_department
+        people = [
+            _person_leaf_from_participation(p, task, today)
+            for p in parts_by_dept.get(dept.pk, [])
+            if p.role == TaskParticipation.ROLE_LEAD
+        ]
+        # Luôn hiện Trưởng tổ Chủ trì nếu chưa có trong participations
+        leader_asg = next(
+            (
+                a for a in task.assignments.all()
+                if a.assignee_id and a.assignee_id == dept.leader_id
+            ),
+            None,
+        )
+        if leader_asg and not any(p['assignment'] and p['assignment'].pk == leader_asg.pk for p in people):
+            # Nếu đã có participation của leader thì thôi; không thì thêm assignment
+            leader_in_parts = any(
+                p.user_id == dept.leader_id for p in parts_by_dept.get(dept.pk, [])
+            )
+            if not leader_in_parts:
+                people.insert(0, _person_leaf_from_assignment(leader_asg, task, today))
+        if not people and leader_asg:
+            people = [_person_leaf_from_assignment(leader_asg, task, today)]
+        departments.append(_dept_node(dept, people))
+
+    for dept in task.coordinating_departments.all():
+        people = [
+            _person_leaf_from_participation(p, task, today)
+            for p in parts_by_dept.get(dept.pk, [])
+        ]
+        leader_asg = next(
+            (
+                a for a in task.assignments.all()
+                if a.assignee_id and a.assignee_id == dept.leader_id
+            ),
+            None,
+        )
+        if leader_asg:
+            leader_in_parts = any(p.user_id == dept.leader_id for p in parts_by_dept.get(dept.pk, []))
+            if not leader_in_parts:
+                people.insert(0, _person_leaf_from_assignment(leader_asg, task, today))
+        if not people and leader_asg:
+            people = [_person_leaf_from_assignment(leader_asg, task, today)]
+        departments.append(_dept_node(dept, people))
+
+    if not departments:
+        # Fallback: mọi assignment
+        people = [
+            _person_leaf_from_assignment(a, task, today)
+            for a in task.assignments.all()
+        ]
+        if people:
+            departments.append(
+                _dept_node(
+                    type('D', (), {
+                        'pk': 0,
+                        'name': 'Người nhận',
+                        'badge_classes': 'bg-slate-100 text-slate-700 ring-slate-500/20',
+                    })(),
+                    people,
+                )
+            )
+
+    node = _tree_node_meta(
+        task.title,
+        departments,
+        today,
+        deadline=task.deadline,
+        task=task,
+        node_id=f'task-{task.pk}',
+        kind='team',
+    )
+    # Giữ progress/status đã enrich của task tổ (canonical) nếu có
+    node['display_status'] = task.display_status
+    node['display_status_label'] = task.display_status_label
+    node['display_status_pill'] = task.display_status_pill
+    node['pct'] = task.progress_pct
+    node['progress_label'] = task.progress_label
+    if node['total']:
+        node['progress_label'] = f'{node["done"]}/{node["total"]} xong · {task.progress_label}'
+    return node
+
+
+def _build_batch_department_tree_node(task, today):
+    """Giao đồng loạt theo tổ: L1 task → L2 tổ (assignment) → L3 subtask / trưởng tổ."""
+    task = _enrich_task_row(task, today)
+    subtasks = list(getattr(task, 'prefetched_subtasks', None) or task.subtasks.all())
+    departments = []
+    for assignment in task.assignments.all():
+        if not assignment.assignee_department_id:
+            continue
+        dept = assignment.assignee_department
+        people = []
+        # Sub-tasks thuộc tổ
+        scoped = [
+            s for s in subtasks
+            if s.scope_department_id == dept.pk
+        ]
+        for sub in scoped:
+            for a in sub.assignments.all():
+                people.append(_person_leaf_from_assignment(a, sub, today))
+        # Thành viên tham gia trong scope tổ
+        for part in task.participations.all():
+            if part.department_id == dept.pk:
+                # Tránh trùng với subtask assignee
+                if any(p.get('assignment') and p['assignment'].assignee_id == part.user_id for p in people):
+                    continue
+                people.append(_person_leaf_from_participation(part, task, today))
+        # Luôn có đại diện tổ (trưởng tổ / bản nộp tổ)
+        if not any(
+            p.get('assignment') and p['assignment'].pk == assignment.pk for p in people
+        ):
+            people.insert(0, _person_leaf_from_assignment(assignment, task, today))
+        departments.append(_dept_node(dept, people))
+
+    node = _tree_node_meta(
+        task.title,
+        departments,
+        today,
+        deadline=task.deadline,
+        task=task,
+        node_id=f'task-{task.pk}',
+        kind='batch_dept',
+    )
+    node['display_status'] = task.display_status
+    node['display_status_label'] = task.display_status_label
+    node['display_status_pill'] = task.display_status_pill
+    node['pct'] = task.progress_pct
+    node['progress_label'] = task.progress_label
+    if node['total']:
+        node['progress_label'] = f'{node["done"]}/{node["total"]} · {task.progress_label}'
+    return node
+
+
+def _build_flat_node(task, today):
+    task = _enrich_task_row(task, today)
+    return {
+        'kind': 'flat',
+        'is_flat': True,
+        'node_id': f'task-{task.pk}',
+        'task': task,
+        'title': task.title,
+        'deadline': task.deadline,
+        'row_is_overdue': task.row_is_overdue,
+        'pct': task.progress_pct,
+        'progress_label': task.progress_label,
+        'display_status': task.display_status,
+        'display_status_label': task.display_status_label,
+        'display_status_pill': task.display_status_pill,
+        'departments': [],
+        'done': 0,
+        'total': 0,
+    }
+
+
+def _task_should_be_tree(task):
+    if task.batch_key:
+        return True
+    if task.is_team_task:
+        return True
+    if _task_has_department_assignments(task):
+        return True
+    # Nhiều người nhận trên một task cá nhân → cây 1 tổ ảo
+    assignees = [a for a in task.assignments.all() if a.assignee_id]
+    return len(assignees) > 1
+
+
+def _build_manage_tree(tasks, today):
+    """
+    Gom queryset task gốc thành các node cây / hàng phẳng.
+    Batch cùng batch_key chỉ còn 1 node L1.
+    Retrofit: task chưa có batch_key nhưng title dạng '... - [Tên]' → gom theo tiêu đề gốc.
+    """
+    tasks = list(tasks)
+    batch_groups = {}
+    legacy_groups = {}
+    standalone = []
+
+    for task in tasks:
+        if task.batch_key:
+            batch_groups.setdefault(str(task.batch_key), []).append(task)
+            continue
+        base = Task.strip_member_title_suffix(task.title)
+        if base:
+            # Best-effort: cùng người giao + tiêu đề gốc + cửa sổ 10s
+            bucket = int(task.created_at.timestamp() // 10) if task.created_at else 0
+            key = (task.created_by_id, base, bucket)
+            legacy_groups.setdefault(key, []).append(task)
+            continue
+        standalone.append(task)
+
+    nodes = []
+    # Giữ thứ tự theo created_at mới nhất trong nhóm
+    ordered_items = []
+
+    for key, group in batch_groups.items():
+        newest = max(t.created_at for t in group)
+        ordered_items.append((newest, 'batch', group))
+
+    for key, group in legacy_groups.items():
+        if len(group) >= 2:
+            newest = max(t.created_at for t in group)
+            ordered_items.append((newest, 'batch', group))
+        else:
+            standalone.extend(group)
+
+    for task in standalone:
+        ordered_items.append((task.created_at, 'single', task))
+
+    ordered_items.sort(key=lambda x: x[0], reverse=True)
+
+    for _ts, kind, payload in ordered_items:
+        if kind == 'batch':
+            node = _build_batch_tree_node(payload, today)
+            if node:
+                nodes.append(node)
+            continue
+        task = payload
+        if task.is_team_task:
+            nodes.append(_build_team_tree_node(task, today))
+        elif _task_has_department_assignments(task):
+            nodes.append(_build_batch_department_tree_node(task, today))
+        elif _task_should_be_tree(task):
+            # Nhiều assignee cá nhân
+            task = _enrich_task_row(task, today)
+            people = [
+                _person_leaf_from_assignment(a, task, today)
+                for a in task.assignments.all()
+                if a.assignee_id
+            ]
+            dept_node = _dept_node(
+                type('D', (), {
+                    'pk': 0,
+                    'name': 'Người nhận',
+                    'badge_classes': 'bg-slate-100 text-slate-700 ring-slate-500/20',
+                })(),
+                people,
+            )
+            nodes.append(
+                _tree_node_meta(
+                    task.title,
+                    [dept_node],
+                    today,
+                    deadline=task.deadline,
+                    task=task,
+                    node_id=f'task-{task.pk}',
+                    kind='multi',
+                )
+            )
+        else:
+            nodes.append(_build_flat_node(task, today))
+
+    return nodes
+
+
 def _manager_tasks_queryset(user=None):
     """
     Task gốc (không gồm sub-task) mà user đã giao đi (created_by).
@@ -1448,7 +1885,11 @@ def _manager_tasks_queryset(user=None):
     """
     qs = (
         Task.objects.filter(parent_task__isnull=True)
-        .select_related('primary_department', 'created_by')
+        .select_related(
+            'primary_department',
+            'created_by',
+            'source_department',
+        )
         .prefetch_related(
             'coordinating_departments',
             Prefetch(
@@ -1457,11 +1898,21 @@ def _manager_tasks_queryset(user=None):
                     'assignee',
                     'assignee_department',
                     'assignee_department__leader',
-                ),
+                ).prefetch_related('assignee__my_departments'),
             ),
             Prefetch(
                 'participations',
-                queryset=TaskParticipation.objects.select_related('user'),
+                queryset=TaskParticipation.objects.select_related('user', 'department'),
+            ),
+            Prefetch(
+                'subtasks',
+                queryset=Task.objects.select_related('scope_department').prefetch_related(
+                    Prefetch(
+                        'assignments',
+                        queryset=TaskAssignment.objects.select_related('assignee'),
+                    )
+                ),
+                to_attr='prefetched_subtasks',
             ),
         )
         .annotate(assignment_count=Count('assignments', distinct=True))
@@ -1503,23 +1954,22 @@ def manager_manage_tasks(request):
 
     base_qs = _manager_tasks_queryset(request.user)
 
-    # Thống kê trên toàn bộ (trước khi lọc toolbar)
+    # Thống kê trên toàn bộ (trước khi lọc toolbar) — đếm theo node cây
     all_tasks = list(base_qs)
+    all_nodes = _build_manage_tree(all_tasks, today)
     stats = {
-        'total': len(all_tasks),
+        'total': len(all_nodes),
         'in_progress': 0,
         'pending': 0,
         'overdue': 0,
     }
-    status_map = {}
-    for t in all_tasks:
-        st = _task_display_status(t)
-        status_map[t.pk] = st
+    for node in all_nodes:
+        st = node['display_status']
         if st == TaskAssignment.STATUS_IN_PROGRESS or st == TaskAssignment.STATUS_REDO:
             stats['in_progress'] += 1
         elif st == TaskAssignment.STATUS_PENDING:
             stats['pending'] += 1
-        if t.deadline < today and st != TaskAssignment.STATUS_COMPLETED:
+        if node.get('row_is_overdue'):
             stats['overdue'] += 1
 
     qs = base_qs
@@ -1531,23 +1981,36 @@ def manager_manage_tasks(request):
             Q(primary_department_id=dept_id)
             | Q(coordinating_departments__id=dept_id)
             | Q(assignments__assignee_department_id=dept_id)
+            | Q(source_department_id=dept_id)
         ).distinct()
+
+    filtered_tasks = list(qs.order_by('-created_at'))
+    # Lấy đủ sibling cùng batch nếu lọc title chỉ khớp một phần
+    if q or dept_filter:
+        batch_keys = {t.batch_key for t in filtered_tasks if t.batch_key}
+        if batch_keys:
+            sibling_ids = set(
+                Task.objects.filter(
+                    created_by=request.user,
+                    parent_task__isnull=True,
+                    batch_key__in=batch_keys,
+                ).values_list('pk', flat=True)
+            )
+            have_ids = {t.pk for t in filtered_tasks}
+            missing = sibling_ids - have_ids
+            if missing:
+                extra = list(base_qs.filter(pk__in=missing))
+                filtered_tasks.extend(extra)
+
+    tree_nodes = _build_manage_tree(filtered_tasks, today)
+
     if status_filter == 'overdue':
-        overdue_ids = [
-            t.pk for t in qs
-            if t.deadline < today
-            and status_map.get(t.pk, _task_display_status(t)) != TaskAssignment.STATUS_COMPLETED
-        ]
-        qs = qs.filter(pk__in=overdue_ids)
+        tree_nodes = [n for n in tree_nodes if n.get('row_is_overdue')]
     elif status_filter in dict(TaskAssignment.STATUS_CHOICES):
-        matched = [pk for pk, st in status_map.items() if st == status_filter]
-        qs = qs.filter(pk__in=matched)
+        tree_nodes = [n for n in tree_nodes if n['display_status'] == status_filter]
 
-    qs = qs.order_by('-created_at')
-    paginator = Paginator(qs, 10)
+    paginator = Paginator(tree_nodes, 10)
     page_obj = paginator.get_page(request.GET.get('page'))
-
-    rows = [_enrich_task_row(t, today) for t in page_obj.object_list]
 
     edit_task_id = request.GET.get('edit')
     edit_form = None
@@ -1561,7 +2024,8 @@ def manager_manage_tasks(request):
         'manager/manage_tasks.html',
         {
             'page_obj': page_obj,
-            'tasks': rows,
+            'tree_nodes': page_obj.object_list,
+            'tasks': page_obj.object_list,  # tương thích template/test cũ nếu cần
             'stats': stats,
             'q': q,
             'status_filter': status_filter,

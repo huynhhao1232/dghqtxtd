@@ -51,6 +51,8 @@ class TaskAdmin(admin.ModelAdmin):
         'scope_department',
         'parent_task',
         'is_subtask',
+        'batch_key',
+        'source_department',
         'delegated_updater',
         'deadline',
         'cycle',
@@ -61,13 +63,15 @@ class TaskAdmin(admin.ModelAdmin):
         'deadline',
         'primary_department',
         'scope_department',
+        'source_department',
         'is_subtask',
     )
-    search_fields = ('title', 'description')
+    search_fields = ('title', 'description', 'batch_key')
     autocomplete_fields = (
         'created_by',
         'primary_department',
         'scope_department',
+        'source_department',
         'delegated_updater',
         'parent_task',
     )

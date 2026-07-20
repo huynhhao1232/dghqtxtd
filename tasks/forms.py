@@ -212,6 +212,7 @@ class TaskAssignForm(forms.ModelForm):
             cleaned['coordinating_departments'] = Department.objects.none()
             cleaned['batch_departments'] = Department.objects.none()
             cleaned['department_execution_mode'] = self.EXEC_LEADER
+            cleaned['member_department_map'] = {}
         elif mode == self.ASSIGN_DEPARTMENT:
             # Chủ trì — Phối hợp: luôn giao Trưởng tổ điều phối.
             if not primary:
@@ -230,6 +231,7 @@ class TaskAssignForm(forms.ModelForm):
             cleaned['assignees'] = User.objects.filter(pk__in=leader_ids)
             cleaned['coordinating_departments'] = coords
             cleaned['batch_departments'] = Department.objects.none()
+            cleaned['member_department_map'] = {}
         elif mode == self.ASSIGN_BATCH_DEPARTMENT:
             if not batch_depts:
                 raise forms.ValidationError(
@@ -246,6 +248,7 @@ class TaskAssignForm(forms.ModelForm):
                 # Mỗi thành viên tự thực hiện: một Task cá nhân / thành viên (gộp các tổ đã chọn).
                 seen = set()
                 members = []
+                member_department_map = {}
                 empty_depts = []
                 for dept in batch_depts:
                     dept_members = list(
@@ -260,6 +263,7 @@ class TaskAssignForm(forms.ModelForm):
                             continue
                         seen.add(member.pk)
                         members.append(member)
+                        member_department_map[member.pk] = dept
                 if empty_depts:
                     raise forms.ValidationError(
                         'Các Tổ/Nhóm chưa có thành viên để giao đồng loạt: '
@@ -270,11 +274,13 @@ class TaskAssignForm(forms.ModelForm):
                         'Không có thành viên nào trong các Tổ/Nhóm đã chọn.'
                     )
                 cleaned['assignees'] = members
+                cleaned['member_department_map'] = member_department_map
             else:
                 for dept in batch_depts:
                     self._validate_dept_leader(dept, 'Tổ/Nhóm nhận việc')
                 # View sẽ tạo một Task gốc + assignment theo assignee_department cho mỗi tổ.
                 cleaned['assignees'] = User.objects.none()
+                cleaned['member_department_map'] = {}
 
         files = cleaned.get('attachments') or []
         if len(files) > TaskAttachment.MAX_COUNT:

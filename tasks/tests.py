@@ -328,6 +328,10 @@ class SubtaskWBSTestCase(TestCase):
         self.assertEqual(len(tasks), 3)
         self.assertTrue(all(t.primary_department_id is None for t in tasks))
         self.assertTrue(all(not t.is_team_task for t in tasks))
+        batch_keys = {t.batch_key for t in tasks}
+        self.assertEqual(len(batch_keys), 1)
+        self.assertIsNotNone(next(iter(batch_keys)))
+        self.assertTrue(all(t.source_department_id == self.dept.pk for t in tasks))
 
         for member in members:
             display = str(member).strip() or member.username
@@ -348,6 +352,17 @@ class SubtaskWBSTestCase(TestCase):
         self.assertFalse(
             Task.objects.filter(title=base_title).exists()
         )
+
+        # Trang đã giao: 1 node cây, không phải 3 hàng phẳng
+        list_resp = self.client.get(reverse('manager_manage_tasks'))
+        self.assertEqual(list_resp.status_code, 200)
+        nodes = list_resp.context['tree_nodes']
+        batch_nodes = [n for n in nodes if n.get('kind') == 'batch' and n['title'] == base_title]
+        self.assertEqual(len(batch_nodes), 1)
+        self.assertEqual(batch_nodes[0]['total'], 3)
+        self.assertEqual(batch_nodes[0]['done'], 0)
+        self.assertContains(list_resp, '0/3 xong')
+        self.assertContains(list_resp, self.dept.name)
 
     def test_department_leader_coordinate_keeps_existing_flow(self):
         """Chủ trì — Phối hợp → luôn giao Trưởng tổ Chủ trì như cũ."""
@@ -437,8 +452,10 @@ class UnifiedAssignmentDashboardTestCase(TestCase):
         resp = self.client.get(reverse('manager_manage_tasks'))
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.context['stats']['total'], 1)
-        self.assertEqual(len(resp.context['tasks']), 1)
-        self.assertEqual(resp.context['tasks'][0].pk, task.pk)
+        nodes = resp.context['tree_nodes']
+        self.assertEqual(len(nodes), 1)
+        self.assertEqual(nodes[0]['task'].pk, task.pk)
+        self.assertFalse(nodes[0]['is_flat'])
         self.assertContains(resp, 'Đã nộp 1/2')
         self.assertContains(resp, self.dept1.name)
         self.assertContains(resp, self.dept2.name)
@@ -1157,7 +1174,7 @@ class RoleBasedAccessControlTestCase(TestCase):
         self.assertContains(resp, 'Công việc đã giao')
         self.assertContains(resp, 'Chỉ các việc bạn đã phân công')
         # Chỉ việc mình tạo; việc BGH giao tới không vào danh sách (có thể hiện ở thông báo).
-        listed_titles = {t.title for t in resp.context['tasks']}
+        listed_titles = {n['title'] for n in resp.context['tree_nodes']}
         self.assertEqual(listed_titles, {'Tổ đã giao'})
         self.assertEqual(resp.context['stats']['total'], 1)
 

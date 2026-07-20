@@ -1,7 +1,14 @@
+import re
+import uuid
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
+
+
+# Tiêu đề giao đồng loạt / thành viên: "Công việc gốc - [Họ tên]"
+MEMBER_TITLE_SUFFIX_RE = re.compile(r'^(.+?) - \[.+\]$')
 
 
 class EvaluationResult:
@@ -88,6 +95,25 @@ class Task(models.Model):
             'để dữ liệu các tổ độc lập.'
         ),
     )
+    batch_key = models.UUIDField(
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name='Nhóm giao đồng loạt',
+        help_text=(
+            'Các task cá nhân cùng một lần “Mỗi thành viên tự thực hiện” '
+            'chia sẻ cùng batch_key để hiển thị dạng cây.'
+        ),
+    )
+    source_department = models.ForeignKey(
+        'accounts.Department',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='batch_member_tasks',
+        verbose_name='Tổ nguồn (giao đồng loạt)',
+        help_text='Tổ/Nhóm mà thành viên được giao trong lần giao đồng loạt.',
+    )
     is_subtask = models.BooleanField(default=False, verbose_name='Là nhiệm vụ con')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -105,6 +131,23 @@ class Task(models.Model):
 
     def __str__(self):
         return self.title
+
+    @staticmethod
+    def strip_member_title_suffix(title):
+        """Trả về tiêu đề gốc nếu title dạng '... - [Họ tên]', ngược lại None."""
+        match = MEMBER_TITLE_SUFFIX_RE.match((title or '').strip())
+        if not match:
+            return None
+        return match.group(1).strip() or None
+
+    @property
+    def batch_display_title(self):
+        """Tiêu đề nhóm (bỏ hậu tố thành viên) hoặc title gốc."""
+        return self.strip_member_title_suffix(self.title) or self.title
+
+    @classmethod
+    def new_batch_key(cls):
+        return uuid.uuid4()
 
     def save(self, *args, **kwargs):
         self.is_subtask = self.parent_task_id is not None
