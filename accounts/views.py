@@ -25,7 +25,13 @@ from .models import Department, User
 from .vietnamese import sort_users_by_vietnamese_name, user_display_full_name
 from tasks.forms import DepartmentTaskAssignForm
 from tasks.models import Task, TaskAssignment, TaskAttachment, TaskParticipation
-from tasks.views import _enrich_task_row, _task_display_status
+from tasks.views import (
+    STATUS_LABELS,
+    STATUS_PILL,
+    _enrich_task_row,
+    _status_aggregate,
+    _task_display_status,
+)
 
 
 @require_http_methods(['GET', 'POST'])
@@ -339,11 +345,13 @@ def _department_tasks_queryset(department):
             | Q(coordinating_departments=department)
             | Q(assignments__assignee_department=department)
             | Q(assignments__assignee__my_departments=department)
+            | Q(source_department=department)
         )
         .select_related(
             'created_by',
             'primary_department',
             'primary_department__leader',
+            'source_department',
         )
         .prefetch_related(
             'coordinating_departments',
@@ -363,6 +371,156 @@ def _department_tasks_queryset(department):
         .distinct()
         .order_by('-created_at')
     )
+
+
+def _partition_department_tasks_for_kanban(tasks):
+    """
+    Gom task giao đồng loạt (batch_key / tiêu đề '... - [Tên]') thành nhóm.
+    Trả về list (kind, payload) với kind in {'batch', 'single'}.
+    """
+    batch_groups = {}
+    legacy_groups = {}
+    standalone = []
+
+    for task in tasks:
+        if task.batch_key:
+            batch_groups.setdefault(str(task.batch_key), []).append(task)
+            continue
+        base = Task.strip_member_title_suffix(task.title)
+        if base:
+            bucket = int(task.created_at.timestamp() // 10) if task.created_at else 0
+            key = (task.created_by_id, base, bucket)
+            legacy_groups.setdefault(key, []).append(task)
+            continue
+        standalone.append(task)
+
+    ordered = []
+    for group in batch_groups.values():
+        newest = max((t.created_at for t in group), default=None)
+        ordered.append((newest, 'batch', group))
+
+    for group in legacy_groups.values():
+        if len(group) >= 2:
+            newest = max((t.created_at for t in group), default=None)
+            ordered.append((newest, 'batch', group))
+        else:
+            standalone.extend(group)
+
+    for task in standalone:
+        ordered.append((task.created_at, 'single', task))
+
+    ordered.sort(key=lambda x: x[0] or timezone.now(), reverse=True)
+    return [(kind, payload) for _ts, kind, payload in ordered]
+
+
+def _build_department_kanban_batch_row(member_tasks, user, department, today):
+    """Một thẻ Kanban gộp cho nhóm giao đồng loạt theo thành viên."""
+    enriched = [_enrich_task_row(t, today) for t in member_tasks]
+    anchor = min(enriched, key=lambda t: t.pk)
+    title = enriched[0].batch_display_title
+    deadline = min((t.deadline for t in enriched), default=anchor.deadline)
+
+    people = []
+    statuses = []
+    seen_users = set()
+    for task in enriched:
+        for asg in task.assignments.all():
+            if asg.assignee_id:
+                if asg.assignee_id in seen_users:
+                    continue
+                seen_users.add(asg.assignee_id)
+                people.append(asg.assignee)
+                statuses.append(asg.status)
+            elif asg.assignee_department_id and asg.assignee_department.leader_id:
+                leader = asg.assignee_department.leader
+                if leader.pk in seen_users:
+                    continue
+                seen_users.add(leader.pk)
+                people.append(leader)
+                statuses.append(asg.status)
+
+    done, total, _pct, display = _status_aggregate(statuses)
+    if not statuses:
+        display = _task_display_status(anchor)
+        done, total = 0, len(enriched)
+
+    col = _kanban_column_for_status(display)
+    is_overdue = any(
+        t.deadline < today and _task_display_status(t) != TaskAssignment.STATUS_COMPLETED
+        for t in enriched
+    )
+
+    # Ghi đè field hiển thị trên anchor (chỉ trong memory, không save)
+    anchor.title = title
+    anchor.deadline = deadline
+    anchor.display_status = display
+    anchor.display_status_label = STATUS_LABELS.get(display, display)
+    anchor.display_status_pill = STATUS_PILL.get(
+        display, STATUS_PILL[TaskAssignment.STATUS_TODO]
+    )
+    anchor.row_is_overdue = is_overdue
+    anchor.progress_label = f'{done}/{total}' if total else ''
+
+    # Không kéo thẻ nhóm — trạng thái từng người khác nhau
+    action = None
+    if user.is_director:
+        action = {
+            'label': 'Xem chi tiết nhóm',
+            'url': reverse('manager_task_detail', args=[anchor.pk]),
+            'kind': 'review',
+        }
+
+    return {
+        'task': anchor,
+        'assignees': people,
+        'primary_assignee': people[0] if people else None,
+        'action': action,
+        'kanban_column': col,
+        'can_drag': False,
+        'is_batch_group': True,
+        'batch_done': done,
+        'batch_total': total,
+        'batch_task_ids': [t.pk for t in sorted(enriched, key=lambda t: t.pk)],
+        'member_tasks': enriched,
+    }
+
+
+def _build_department_kanban_rows(tasks, user, department, today):
+    """Danh sách thẻ Kanban: 1 thẻ / batch, 1 thẻ / việc đơn."""
+    rows = []
+    for kind, payload in _partition_department_tasks_for_kanban(tasks):
+        if kind == 'batch':
+            group = payload
+            if len(group) >= 2:
+                rows.append(
+                    _build_department_kanban_batch_row(group, user, department, today)
+                )
+                continue
+            # Chỉ còn 1 task của batch trong tổ này → hiện như việc đơn (bỏ hậu tố tên)
+            payload = group[0]
+
+        task = payload
+        st = _task_display_status(task)
+        col = _kanban_column_for_status(st)
+        enriched = _enrich_task_row(task, today)
+        if Task.strip_member_title_suffix(enriched.title) or enriched.batch_key:
+            enriched.title = enriched.batch_display_title
+        assignees = _department_task_assignees(enriched)
+        can_drag = _user_can_update_task_status(user, enriched, department)
+        rows.append({
+            'task': enriched,
+            'assignees': assignees,
+            'primary_assignee': assignees[0] if assignees else None,
+            'action': _department_task_action(enriched, user, department),
+            'kanban_column': col,
+            'can_drag': can_drag,
+            'is_batch_group': False,
+            'batch_done': None,
+            'batch_total': None,
+            'batch_task_ids': [enriched.pk],
+            'member_tasks': [enriched],
+        })
+    return rows
 
 
 def _department_task_action(task, user, department=None):
@@ -645,6 +803,9 @@ def department_interaction(request, dept_id):
     today = timezone.localdate()
     tasks_qs = _department_tasks_queryset(department)
     all_tasks = list(tasks_qs)
+    task_rows = _build_department_kanban_rows(
+        all_tasks, request.user, department, today
+    )
 
     stats = {
         'todo': 0,
@@ -657,34 +818,20 @@ def department_interaction(request, dept_id):
         KANBAN_IN_PROGRESS: [],
         KANBAN_DONE: [],
     }
-    task_rows = []
     can_drag_any = False
-    for task in all_tasks:
-        st = _task_display_status(task)
-        col = _kanban_column_for_status(st)
+    for row in task_rows:
+        col = row['kanban_column']
+        st = row['task'].display_status
         if col == KANBAN_TODO:
             stats['todo'] += 1
         elif col == KANBAN_IN_PROGRESS:
             stats['in_progress'] += 1
         elif st == TaskAssignment.STATUS_PENDING:
             stats['pending'] += 1
-        if task.deadline < today and st != TaskAssignment.STATUS_COMPLETED:
+        if row['task'].row_is_overdue:
             stats['overdue'] += 1
-
-        enriched = _enrich_task_row(task, today)
-        assignees = _department_task_assignees(task)
-        can_drag = _user_can_update_task_status(request.user, task, department)
-        if can_drag:
+        if row.get('can_drag'):
             can_drag_any = True
-        row = {
-            'task': enriched,
-            'assignees': assignees,
-            'primary_assignee': assignees[0] if assignees else None,
-            'action': _department_task_action(task, request.user, department),
-            'kanban_column': col,
-            'can_drag': can_drag,
-        }
-        task_rows.append(row)
         kanban[col].append(row)
 
     member_options = []

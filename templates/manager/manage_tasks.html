@@ -173,6 +173,10 @@
                                         <i class="fas fa-ellipsis"></i>
                                     </button>
                                     <div class="actions-menu hidden absolute right-0 top-full mt-1 z-30 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-left">
+                                        <a href="{% url 'manager_task_detail' task.pk %}#add-performers"
+                                           class="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                            <i class="fas fa-user-plus w-4 text-gray-400"></i> Thêm người nhận
+                                        </a>
                                         <button type="button"
                                                 class="btn-edit w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                                                 data-id="{{ task.pk }}"
@@ -280,6 +284,10 @@
                                         <i class="fas fa-ellipsis"></i>
                                     </button>
                                     <div class="actions-menu hidden absolute right-0 top-full mt-1 z-30 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-left">
+                                        <a href="{% url 'manager_task_detail' node.task.pk %}#add-performers"
+                                           class="block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                            <i class="fas fa-user-plus w-4 text-gray-400"></i> Thêm người nhận
+                                        </a>
                                         <button type="button"
                                                 class="btn-edit w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                                                 data-id="{{ node.task.pk }}"

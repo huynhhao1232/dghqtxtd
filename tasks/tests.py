@@ -361,7 +361,7 @@ class SubtaskWBSTestCase(TestCase):
         self.assertEqual(len(batch_nodes), 1)
         self.assertEqual(batch_nodes[0]['total'], 3)
         self.assertEqual(batch_nodes[0]['done'], 0)
-        self.assertContains(list_resp, '0/3 xong')
+        self.assertContains(list_resp, '0%')
         self.assertContains(list_resp, 'Chi tiết')
         self.assertNotContains(list_resp, 'tree-toggle')
         self.assertContains(list_resp, self.dept.name)
@@ -378,6 +378,63 @@ class SubtaskWBSTestCase(TestCase):
         self.assertContains(detail, 'dept-members')
         self.assertIsNotNone(detail.context['hierarchy'])
         self.assertEqual(detail.context['hierarchy']['total'], 3)
+
+    def test_department_kanban_groups_batch_member_tasks_into_one_card(self):
+        """Workspace tổ: N task '... - [Tên]' cùng batch → 1 thẻ Kanban + API members."""
+        self.client.force_login(self.manager)
+        base_title = 'Nộp giáo án điện tử'
+        response = self.client.post(reverse('manager_create_task'), {
+            'title': base_title,
+            'description': 'Mỗi GV nộp riêng',
+            'deadline': self.parent.deadline.isoformat(),
+            'cycle': Task.CYCLE_MONTH,
+            'assign_mode': 'batch_department',
+            'batch_departments': [self.dept.pk],
+            'department_execution_mode': 'all_members',
+        })
+        self.assertEqual(response.status_code, 302)
+        tasks = list(Task.objects.filter(title__startswith=f'{base_title} - ['))
+        self.assertEqual(len(tasks), 3)
+
+        self.client.force_login(self.leader)
+        kanban = self.client.get(
+            reverse('department_interaction', kwargs={'dept_id': self.dept.pk})
+        )
+        self.assertEqual(kanban.status_code, 200)
+        rows = kanban.context['task_rows']
+        batch_rows = [r for r in rows if r.get('is_batch_group')]
+        self.assertEqual(len(batch_rows), 1)
+        self.assertEqual(batch_rows[0]['task'].title, base_title)
+        self.assertEqual(batch_rows[0]['batch_total'], 3)
+        self.assertFalse(batch_rows[0]['can_drag'])
+        self.assertContains(kanban, base_title)
+        self.assertContains(kanban, '0/3 xong')
+        self.assertContains(kanban, 'data-is-batch="1"')
+        # Thẻ Kanban dùng tiêu đề gốc (không hậu tố thành viên)
+        card_titles = [
+            r['task'].title for r in rows if r.get('is_batch_group')
+        ]
+        self.assertEqual(card_titles, [base_title])
+        for r in rows:
+            if r.get('is_batch_group'):
+                self.assertNotIn(' - [', r['task'].title)
+
+        anchor_id = batch_rows[0]['task'].pk
+        member_ids = ','.join(str(t) for t in batch_rows[0]['batch_task_ids'])
+        api = self.client.get(
+            reverse('task_detail_api', kwargs={'pk': anchor_id}),
+            {
+                'dept_id': self.dept.pk,
+                'member_ids': member_ids,
+            },
+        )
+        self.assertEqual(api.status_code, 200)
+        payload = api.json()
+        self.assertTrue(payload['is_batch'])
+        self.assertEqual(payload['title'], base_title)
+        self.assertEqual(payload['batch_total'], 3)
+        self.assertEqual(len(payload['members']), 3)
+        self.assertTrue(all(m.get('detail_url') for m in payload['members']))
 
     def test_department_leader_coordinate_keeps_existing_flow(self):
         """Chủ trì — Phối hợp → luôn giao Trưởng tổ Chủ trì như cũ."""

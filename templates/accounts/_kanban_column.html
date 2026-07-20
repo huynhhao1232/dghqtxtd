@@ -18,9 +18,11 @@
                         {% if row.can_drag %}cursor-grab active:cursor-grabbing{% else %}cursor-pointer{% endif %}"
                  data-task-id="{{ row.task.pk }}"
                  data-can-drag="{% if row.can_drag %}1{% else %}0{% endif %}"
+                 data-is-batch="{% if row.is_batch_group %}1{% else %}0{% endif %}"
+                 {% if row.batch_task_ids %}data-batch-task-ids="{% for tid in row.batch_task_ids %}{{ tid }}{% if not forloop.last %},{% endif %}{% endfor %}"{% endif %}
                  role="button"
                  tabindex="0"
-                 title="Xem chi tiết">
+                 title="{% if row.is_batch_group %}Xem từng thành viên{% else %}Xem chi tiết{% endif %}">
             <div class="flex items-start justify-between gap-2">
                 <p class="text-sm font-semibold text-gray-900 leading-snug kanban-card-title">{{ row.task.title }}</p>
                 {% if row.action %}
@@ -32,6 +34,16 @@
                 </a>
                 {% endif %}
             </div>
+
+            {% if row.is_batch_group %}
+            <p class="mt-1 text-[11px] text-gray-400">
+                <i class="fas fa-users mr-0.5"></i>
+                Giao đồng loạt · {{ row.batch_total }} thành viên
+                {% if not row.can_drag %}
+                <span class="text-gray-300">· kéo từng người trong chi tiết</span>
+                {% endif %}
+            </p>
+            {% endif %}
 
             <div class="mt-2.5 flex flex-wrap items-center gap-2">
                 {% if row.task.row_is_overdue %}
@@ -45,25 +57,45 @@
                     {{ row.task.deadline|date:"d/m/Y" }}
                 </span>
                 {% endif %}
+                {% if row.is_batch_group and row.batch_total %}
+                <span class="inline-flex px-2 py-0.5 rounded-md text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+                    {{ row.batch_done }}/{{ row.batch_total }} xong
+                </span>
+                {% endif %}
                 <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium {{ row.task.display_status_pill }}">
                     {{ row.task.display_status_label }}
                 </span>
             </div>
 
-            {% with person=row.primary_assignee %}
-            {% if person %}
+            {% if row.assignees %}
             <div class="mt-3 flex items-center gap-2 min-w-0">
-                <img src="{{ person.avatar_url }}" alt=""
-                     class="w-7 h-7 rounded-full object-cover border border-gray-200 shrink-0">
+                <div class="flex -space-x-2 shrink-0">
+                    {% for person in row.assignees|slice:":4" %}
+                    <img src="{{ person.avatar_url }}" alt=""
+                         class="w-7 h-7 rounded-full object-cover border-2 border-white ring-1 ring-gray-100"
+                         title="{{ person }}">
+                    {% endfor %}
+                </div>
+                {% if row.is_batch_group %}
+                <span class="text-xs text-gray-600 truncate">
+                    {% if row.assignees|length == 1 %}
+                    {{ row.assignees.0 }}
+                    {% else %}
+                    {{ row.assignees.0 }}{% if row.assignees|length > 1 %} +{{ row.assignees|length|add:"-1" }}{% endif %}
+                    {% endif %}
+                </span>
+                {% else %}
+                {% with person=row.primary_assignee %}
                 <span class="text-xs text-gray-700 truncate">{{ person }}</span>
                 {% if row.assignees|length > 1 %}
                 <span class="text-[10px] text-gray-400 shrink-0">+{{ row.assignees|length|add:"-1" }}</span>
+                {% endif %}
+                {% endwith %}
                 {% endif %}
             </div>
             {% else %}
             <p class="mt-3 text-xs text-gray-400">Chưa có người nhận</p>
             {% endif %}
-            {% endwith %}
         </article>
         {% endfor %}
     </div>

@@ -20,6 +20,7 @@ from accounts.models import Department, User
 
 from .forms import (
     AddMembersForm,
+    AddTaskPerformersForm,
     CoordinatingProofForm,
     InternalEvaluationForm,
     ReviewForm,
@@ -1955,6 +1956,169 @@ def _user_can_administer_managed_task(user, task):
     return False
 
 
+def _user_can_add_performers(user, task):
+    """
+    Thêm người/tổ thực hiện: người tạo task, hoặc BGH (director/manager).
+    Role Tổ chỉ được thêm trên việc mình đã giao (created_by).
+    """
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+    if task.created_by_id == user.id:
+        return True
+    return bool(
+        getattr(user, 'is_director', False) or getattr(user, 'is_manager', False)
+    )
+
+
+def _batch_existing_assignee_ids(task):
+    if not task.batch_key:
+        return set(
+            task.assignments.filter(assignee_id__isnull=False).values_list(
+                'assignee_id', flat=True
+            )
+        )
+    return set(
+        TaskAssignment.objects.filter(
+            task__batch_key=task.batch_key,
+            assignee_id__isnull=False,
+        ).values_list('assignee_id', flat=True)
+    )
+
+
+def _create_batch_member_task(anchor, user, source_department=None):
+    """Tạo task sibling trong batch (mỗi thành viên một việc) — giống giao đồng loạt."""
+    base_title = anchor.batch_display_title
+    display = str(user).strip() or user.username
+    new_task = Task.objects.create(
+        title=f'{base_title} - [{display}]',
+        description=anchor.description,
+        deadline=anchor.deadline,
+        cycle=anchor.cycle,
+        created_by=anchor.created_by,
+        primary_department=None,
+        batch_key=anchor.batch_key,
+        source_department=source_department,
+    )
+    TaskAssignment.objects.create(task=new_task, assignee=user)
+    return new_task
+
+
+def _add_users_as_performers(task, users):
+    """Thêm cá nhân vào task. Trả về số bản phân công / task mới đã tạo."""
+    added = 0
+    if task.batch_key:
+        existing = _batch_existing_assignee_ids(task)
+        for user in users:
+            if user.pk in existing:
+                continue
+            source_dept = user.primary_department
+            _create_batch_member_task(task, user, source_department=source_dept)
+            existing.add(user.pk)
+            added += 1
+        return added
+
+    for user in users:
+        _, created = TaskAssignment.objects.get_or_create(task=task, assignee=user)
+        if created:
+            added += 1
+        if task.is_team_task and task.primary_department_id:
+            TaskParticipation.objects.get_or_create(
+                task=task,
+                user=user,
+                defaults={
+                    'department': task.primary_department,
+                    'role': TaskParticipation.ROLE_LEAD,
+                },
+            )
+    return added
+
+
+def _add_departments_as_performers(task, departments, exec_mode):
+    """
+    Thêm Tổ/Nhóm.
+    - leader_coordinate: assignment theo tổ (hoặc trưởng tổ nếu task Chủ trì–Phối hợp)
+    - all_members: thêm từng thành viên (batch → sibling tasks)
+    """
+    added = 0
+    if exec_mode == AddTaskPerformersForm.EXEC_ALL_MEMBERS:
+        seen = set(_batch_existing_assignee_ids(task) if task.batch_key else set(
+            task.assignments.filter(assignee_id__isnull=False).values_list(
+                'assignee_id', flat=True
+            )
+        ))
+        for dept in departments:
+            members = list(
+                dept.members.filter(is_active=True)
+                .exclude(role=User.ROLE_DIRECTOR)
+                .order_by('last_name', 'first_name', 'username')
+            )
+            for member in members:
+                if member.pk in seen:
+                    continue
+                if task.batch_key:
+                    _create_batch_member_task(task, member, source_department=dept)
+                else:
+                    _, created = TaskAssignment.objects.get_or_create(
+                        task=task, assignee=member
+                    )
+                    if not created:
+                        continue
+                    if task.is_team_task and task.primary_department_id:
+                        TaskParticipation.objects.get_or_create(
+                            task=task,
+                            user=member,
+                            defaults={
+                                'department': dept,
+                                'role': (
+                                    TaskParticipation.ROLE_COORD
+                                    if dept.pk != task.primary_department_id
+                                    else TaskParticipation.ROLE_LEAD
+                                ),
+                            },
+                        )
+                seen.add(member.pk)
+                added += 1
+        return added
+
+    # Trưởng tổ điều phối
+    for dept in departments:
+        if task.is_team_task:
+            if task.primary_department_id == dept.pk:
+                continue
+            if task.coordinating_departments.filter(pk=dept.pk).exists():
+                continue
+            leader = dept.leader
+            if not leader:
+                continue
+            task.coordinating_departments.add(dept)
+            _, created = TaskAssignment.objects.get_or_create(
+                task=task, assignee=leader
+            )
+            if created:
+                added += 1
+            continue
+
+        if task.batch_key:
+            # Batch cá nhân: thêm trưởng tổ như một thành viên sibling
+            leader = dept.leader
+            if not leader:
+                continue
+            existing = _batch_existing_assignee_ids(task)
+            if leader.pk in existing:
+                continue
+            _create_batch_member_task(task, leader, source_department=dept)
+            added += 1
+            continue
+
+        if task.assignments.filter(assignee_department=dept).exists():
+            continue
+        assignment = TaskAssignment(task=task, assignee_department=dept)
+        assignment._batch_department_assignment = True
+        assignment.save()
+        added += 1
+    return added
+
+
 def _get_managed_task_or_403(user, pk):
     task = get_object_or_404(Task, pk=pk, parent_task__isnull=True)
     if not _user_can_administer_managed_task(user, task):
@@ -2388,6 +2552,28 @@ def manager_task_detail(request, pk):
     else:
         progress_pct = int(round((submitted / total) * 100)) if total else 0
     review_form = ReviewForm()
+    can_add_performers = _user_can_add_performers(request.user, task)
+    add_form = AddTaskPerformersForm(user=request.user, task=task) if can_add_performers else None
+    staff_options = []
+    dept_options = []
+    if add_form is not None:
+        for u in add_form.fields['assignees'].queryset:
+            depts = ', '.join(d.name for d in u.my_departments.all())
+            staff_options.append({
+                'id': u.id,
+                'name': u.get_full_name() or u.username,
+                'username': u.username,
+                'avatar': u.avatar_url,
+                'department': depts,
+            })
+        dept_options = [
+            {
+                'id': d.id,
+                'name': d.name,
+                'leader': str(d.leader) if d.leader_id else '',
+            }
+            for d in add_form.fields['departments'].queryset
+        ]
 
     return render(
         request,
@@ -2404,8 +2590,65 @@ def manager_task_detail(request, pk):
             'review_form': review_form,
             'status_labels': STATUS_LABELS,
             'status_pill': STATUS_PILL,
+            'can_add_performers': can_add_performers,
+            'add_performers_form': add_form,
+            'staff_options_json': json.dumps(staff_options, ensure_ascii=False),
+            'dept_options_json': json.dumps(dept_options, ensure_ascii=False),
         },
     )
+
+
+@assigner_required
+@require_POST
+def manager_task_add_performers(request, pk):
+    task = _get_managed_task_or_403(request.user, pk)
+    if not _user_can_add_performers(request.user, task):
+        raise PermissionDenied('Bạn không có quyền thêm người nhận cho công việc này.')
+
+    form = AddTaskPerformersForm(request.POST, user=request.user, task=task)
+    redirect_url = reverse('manager_task_detail', kwargs={'pk': task.pk}) + '#add-performers'
+    if not form.is_valid():
+        err = form.non_field_errors()
+        if not err:
+            err = [e for errs in form.errors.values() for e in errs]
+        messages.error(
+            request,
+            err[0] if err else 'Không thể thêm người nhận. Vui lòng chọn lại.',
+        )
+        return redirect(redirect_url)
+
+    users = list(form.cleaned_data.get('assignees') or [])
+    departments = list(form.cleaned_data.get('departments') or [])
+    exec_mode = form.cleaned_data.get('department_execution_mode')
+
+    with transaction.atomic():
+        added_users = _add_users_as_performers(task, users) if users else 0
+        added_depts = (
+            _add_departments_as_performers(task, departments, exec_mode)
+            if departments
+            else 0
+        )
+
+    total_added = added_users + added_depts
+    if total_added:
+        parts = []
+        if added_users:
+            parts.append(f'{added_users} cá nhân')
+        if added_depts:
+            if exec_mode == AddTaskPerformersForm.EXEC_ALL_MEMBERS:
+                parts.append(f'{added_depts} thành viên từ tổ đã chọn')
+            else:
+                parts.append(f'{added_depts} Tổ/Nhóm')
+        messages.success(
+            request,
+            f'Đã thêm {" và ".join(parts)} vào công việc.',
+        )
+    else:
+        messages.info(
+            request,
+            'Không có người/tổ mới được thêm (đã có trong danh sách nhận việc).',
+        )
+    return redirect(redirect_url)
 
 
 @manager_required
@@ -2603,6 +2846,10 @@ def task_detail_api(request, pk):
     """
     GET /api/tasks/<pk>/ — JSON chi tiết task cho modal Kanban.
     pk khớp data-task-id (Task.id); cũng chấp nhận TaskAssignment.id như staff_task_detail.
+
+    Query (tuỳ chọn):
+    - dept_id: giới hạn thành viên batch theo tổ (workspace Kanban)
+    - member_ids: danh sách Task.id trong nhóm (legacy không có batch_key)
     """
     try:
         assignment = _get_staff_assignment(request, pk)
@@ -2615,7 +2862,7 @@ def task_detail_api(request, pk):
         return JsonResponse({'error': 'Không tìm thấy nhiệm vụ.'}, status=404)
 
     task = (
-        Task.objects.select_related('created_by')
+        Task.objects.select_related('created_by', 'source_department')
         .prefetch_related(
             'assignments__assignee',
             'assignments__assignee_department',
@@ -2625,6 +2872,11 @@ def task_detail_api(request, pk):
         .filter(pk=assignment.task_id)
         .first()
     ) or assignment.task
+
+    today = timezone.localdate()
+    batch_payload = _task_detail_api_batch_members(request, task, today)
+    if batch_payload:
+        return JsonResponse(batch_payload)
 
     display = _task_display_status(task)
     assignee_names = [
@@ -2659,4 +2911,153 @@ def task_detail_api(request, pk):
         'score': score,
         'comment': comment,
         'proofs': _collect_task_proofs(task),
+        'is_batch': False,
+        'members': [],
     })
+
+
+def _task_detail_api_batch_members(request, task, today):
+    """
+    Nếu task thuộc nhóm giao đồng loạt (batch_key hoặc member_ids),
+    trả về JSON modal nhóm; ngược lại None.
+    """
+    member_ids_raw = (request.GET.get('member_ids') or '').strip()
+    member_ids = []
+    if member_ids_raw:
+        for part in member_ids_raw.split(','):
+            part = part.strip()
+            if part.isdigit():
+                member_ids.append(int(part))
+
+    siblings = []
+    if member_ids and len(member_ids) >= 2:
+        siblings = list(
+            Task.objects.filter(pk__in=member_ids, parent_task__isnull=True)
+            .select_related('created_by', 'source_department')
+            .prefetch_related(
+                Prefetch(
+                    'assignments',
+                    queryset=TaskAssignment.objects.select_related(
+                        'assignee',
+                        'assignee_department',
+                        'assignee_department__leader',
+                    ),
+                ),
+                'attachments',
+                'coordinating_proofs',
+            )
+            .order_by('pk')
+        )
+    elif task.batch_key:
+        siblings_qs = (
+            Task.objects.filter(batch_key=task.batch_key, parent_task__isnull=True)
+            .select_related('created_by', 'source_department')
+            .prefetch_related(
+                Prefetch(
+                    'assignments',
+                    queryset=TaskAssignment.objects.select_related(
+                        'assignee',
+                        'assignee_department',
+                        'assignee_department__leader',
+                    ),
+                ),
+                'attachments',
+                'coordinating_proofs',
+            )
+            .order_by('pk')
+        )
+        dept_id = (request.GET.get('dept_id') or '').strip()
+        if dept_id.isdigit():
+            dept = Department.objects.filter(pk=int(dept_id)).first()
+            if dept and (
+                request.user.is_director
+                or dept.user_can_access(request.user)
+            ):
+                siblings_qs = siblings_qs.filter(
+                    Q(source_department=dept)
+                    | Q(primary_department=dept)
+                    | Q(assignments__assignee_department=dept)
+                    | Q(assignments__assignee__my_departments=dept)
+                ).distinct()
+        siblings = list(siblings_qs)
+
+    if len(siblings) < 2:
+        return None
+
+    # Chỉ giữ sibling user được phép xem (ít nhất 1 assignment oversees)
+    visible = []
+    for sib in siblings:
+        asgs = list(sib.assignments.all())
+        if not asgs:
+            continue
+        if request.user.is_director or any(
+            _user_oversees_assignment(request.user, a) for a in asgs
+        ):
+            visible.append(sib)
+    if len(visible) < 2:
+        return None
+
+    members = []
+    statuses = []
+    for sib in visible:
+        for asg in sib.assignments.all():
+            if not asg.assignee_id and not asg.assignee_department_id:
+                continue
+            leaf = _person_leaf_from_assignment(asg, sib, today)
+            members.append({
+                'name': leaf['name'],
+                'avatar_url': leaf['avatar_url'],
+                'status': leaf['status'],
+                'status_display': leaf['status_label'],
+                'status_pill': leaf['status_pill'],
+                'deadline': (
+                    leaf['deadline'].strftime('%d/%m/%Y') if leaf['deadline'] else '—'
+                ),
+                'is_overdue': leaf['is_overdue'],
+                'grade': leaf['grade'],
+                'detail_url': leaf['detail_url'],
+                'task_id': sib.pk,
+                'assignment_id': asg.pk,
+            })
+            statuses.append(leaf['status'])
+
+    if not members:
+        return None
+
+    done, total, _pct, display = _status_aggregate(statuses)
+    anchor = min(visible, key=lambda t: t.pk)
+    title = anchor.batch_display_title
+    deadline = min((t.deadline for t in visible), default=anchor.deadline)
+    description = next(
+        (t.description for t in visible if t.description),
+        '',
+    ) or ''
+
+    # Gom minh chứng từ mọi sibling
+    proofs = []
+    seen_urls = set()
+    for sib in visible:
+        for p in _collect_task_proofs(sib):
+            url = p.get('url')
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                proofs.append(p)
+
+    return {
+        'id': anchor.pk,
+        'title': title,
+        'description': description,
+        'assignee': f'{total} thành viên',
+        'assignee_name': f'{total} thành viên',
+        'deadline': deadline.strftime('%d/%m/%Y') if deadline else '—',
+        'status': display,
+        'status_display': STATUS_LABELS.get(display, display),
+        'grade': '—',
+        'score': None,
+        'comment': '',
+        'proofs': proofs,
+        'is_batch': True,
+        'batch_done': done,
+        'batch_total': total,
+        'members': members,
+    }

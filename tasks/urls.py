@@ -27,6 +27,11 @@ urlpatterns = [
     path('manager/tasks/manage/', views.manager_manage_tasks, name='manager_manage_tasks'),
     path('manager/tasks/<int:pk>/', views.manager_task_detail, name='manager_task_detail'),
     path(
+        'manager/tasks/<int:pk>/add-performers/',
+        views.manager_task_add_performers,
+        name='manager_task_add_performers',
+    ),
+    path(
         'manager/tasks/<int:pk>/assignments/<int:assignment_pk>/review/',
         views.manager_assignment_review,
         name='manager_assignment_review',

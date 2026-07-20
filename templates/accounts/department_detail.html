@@ -57,6 +57,7 @@
 
     {# ── Kanban board ── #}
     <div class="flex gap-4 overflow-x-auto pb-4 min-h-[500px]" id="kanban-board"
+         data-dept-id="{{ department.pk }}"
          data-status-url="{{ status_update_url }}"
          data-can-drag="{{ can_drag_any|yesno:'1,0' }}">
 
@@ -112,7 +113,14 @@
                         <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Mô tả công việc</p>
                         <p id="modalTaskDesc" class="text-sm text-gray-800 leading-relaxed whitespace-pre-line">—</p>
                     </div>
-                    <div>
+                    <div id="modalBatchMembersWrap" class="hidden">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <p class="text-xs font-semibold uppercase tracking-wide text-gray-400">Thành viên trong nhóm</p>
+                            <span id="modalBatchProgress" class="text-xs font-semibold text-primary"></span>
+                        </div>
+                        <ul id="modalBatchMembers" class="divide-y divide-gray-100 rounded-xl border border-gray-100 overflow-hidden bg-white"></ul>
+                    </div>
+                    <div id="modalProofsWrap">
                         <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Minh chứng đính kèm</p>
                         <div id="modalTaskProofs" class="space-y-2 text-sm text-gray-600">
                             <p class="text-gray-400">Chưa có minh chứng</p>
@@ -123,7 +131,7 @@
                 <div class="space-y-4">
                     <div class="rounded-2xl bg-gray-50 border border-gray-100 p-4 space-y-3">
                         <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-400">Người thực hiện</p>
+                            <p class="text-[11px] font-semibold uppercase tracking-wide text-gray-400" id="modalAssigneeLabel">Người thực hiện</p>
                             <p id="modalTaskAssignee" class="mt-1 text-sm font-medium text-gray-900">—</p>
                         </div>
                         <div>
@@ -138,7 +146,7 @@
                         </div>
                     </div>
 
-                    <div class="rounded-2xl border border-gray-100 p-4">
+                    <div id="modalGradeWrap" class="rounded-2xl border border-gray-100 p-4">
                         <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Đánh giá / Chấm điểm</p>
                         <p id="modalTaskGrade" class="text-2xl font-bold text-emerald-600">—</p>
                         <p id="modalTaskComment" class="mt-2 text-sm text-gray-600 whitespace-pre-line">—</p>
@@ -295,7 +303,8 @@
                 return;
             }
             var taskId = card.getAttribute('data-task-id');
-            if (taskId) openTaskModal(taskId);
+            var batchIds = card.getAttribute('data-batch-task-ids') || '';
+            if (taskId) openTaskModal(taskId, batchIds);
         });
         board.addEventListener('keydown', function (e) {
             if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -303,7 +312,8 @@
             if (!card) return;
             e.preventDefault();
             var taskId = card.getAttribute('data-task-id');
-            if (taskId) openTaskModal(taskId);
+            var batchIds = card.getAttribute('data-batch-task-ids') || '';
+            if (taskId) openTaskModal(taskId, batchIds);
         });
     }
 
@@ -412,7 +422,62 @@
         }).join('');
     }
 
-    window.openTaskModal = function openTaskModal(taskId) {
+    function fillBatchMembers(members) {
+        var wrap = document.getElementById('modalBatchMembersWrap');
+        var list = document.getElementById('modalBatchMembers');
+        var progress = document.getElementById('modalBatchProgress');
+        if (!wrap || !list) return;
+        if (!members || !members.length) {
+            wrap.classList.add('hidden');
+            list.innerHTML = '';
+            if (progress) progress.textContent = '';
+            return;
+        }
+        wrap.classList.remove('hidden');
+        var done = members.filter(function (m) {
+            return m.status === 'completed';
+        }).length;
+        if (progress) progress.textContent = done + '/' + members.length + ' xong';
+        list.innerHTML = members.map(function (m) {
+            var name = escapeHtml(m.name || '—');
+            var avatar = escapeHtml(m.avatar_url || '');
+            var statusLabel = escapeHtml(m.status_display || m.status || '—');
+            var statusPill = escapeHtml(m.status_pill || 'bg-gray-100 text-gray-700');
+            var detailUrl = escapeHtml(m.detail_url || '#');
+            var overdue = m.is_overdue
+                ? '<span class="text-red-500 font-medium"> · Quá hạn</span>'
+                : '';
+            var grade = m.grade
+                ? '<span class="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-violet-50 text-violet-700">' +
+                  escapeHtml(m.grade) + '</span>'
+                : '';
+            return (
+                '<li class="px-4 py-3 flex flex-wrap items-center justify-between gap-3 hover:bg-slate-50/80">' +
+                '<div class="flex items-center gap-3 min-w-0">' +
+                '<img src="' + avatar + '" alt="" class="w-9 h-9 rounded-full object-cover ring-1 ring-gray-200 shrink-0">' +
+                '<div class="min-w-0">' +
+                '<p class="text-sm font-semibold text-gray-900 truncate">' + name + '</p>' +
+                '<p class="text-[11px] text-gray-400 mt-0.5">Hạn ' + escapeHtml(m.deadline || '—') + overdue + '</p>' +
+                '</div></div>' +
+                '<div class="flex flex-wrap items-center gap-2">' +
+                '<span class="inline-flex px-2.5 py-1 rounded-full text-xs font-medium ' + statusPill + '">' +
+                statusLabel + '</span>' + grade +
+                '<a href="' + detailUrl + '" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 transition">' +
+                '<i class="fas fa-external-link-alt"></i> Xem bài</a>' +
+                '</div></li>'
+            );
+        }).join('');
+    }
+
+    function resetModalBatchUi() {
+        fillBatchMembers([]);
+        var label = document.getElementById('modalAssigneeLabel');
+        if (label) label.textContent = 'Người thực hiện';
+        var gradeWrap = document.getElementById('modalGradeWrap');
+        if (gradeWrap) gradeWrap.classList.remove('hidden');
+    }
+
+    window.openTaskModal = function openTaskModal(taskId, batchTaskIds) {
         if (!taskModal || !taskId) return;
         if (closeTimer) {
             clearTimeout(closeTimer);
@@ -438,9 +503,17 @@
         document.getElementById('modalTaskStatus').innerHTML =
             '<span class="inline-flex px-2.5 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">—</span>';
         fillProofs([]);
+        resetModalBatchUi();
         setLoading(true);
 
-        fetch('/api/tasks/' + encodeURIComponent(taskId) + '/', {
+        var deptId = board ? board.getAttribute('data-dept-id') : '';
+        var qs = [];
+        if (deptId) qs.push('dept_id=' + encodeURIComponent(deptId));
+        if (batchTaskIds) qs.push('member_ids=' + encodeURIComponent(batchTaskIds));
+        var url = '/api/tasks/' + encodeURIComponent(taskId) + '/';
+        if (qs.length) url += '?' + qs.join('&');
+
+        fetch(url, {
             method: 'GET',
             credentials: 'same-origin',
             headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
@@ -466,16 +539,28 @@
                 escapeHtml(data.status_display || data.status || '—') +
                 '</span>';
 
-            var gradeText = data.grade || '—';
-            if (data.score != null && data.score !== '' && Number(data.score) > 0) {
-                gradeText = gradeText + ' (−' + data.score + ')';
+            if (data.is_batch && data.members && data.members.length) {
+                fillBatchMembers(data.members);
+                var label = document.getElementById('modalAssigneeLabel');
+                if (label) label.textContent = 'Nhóm thực hiện';
+                var gradeWrap = document.getElementById('modalGradeWrap');
+                if (gradeWrap) gradeWrap.classList.add('hidden');
+                document.getElementById('modalTaskAssignee').textContent =
+                    (data.batch_total || data.members.length) + ' thành viên · ' +
+                    (data.batch_done || 0) + '/' + (data.batch_total || data.members.length) + ' xong';
+            } else {
+                resetModalBatchUi();
+                var gradeText = data.grade || '—';
+                if (data.score != null && data.score !== '' && Number(data.score) > 0) {
+                    gradeText = gradeText + ' (−' + data.score + ')';
+                }
+                var gradeEl = document.getElementById('modalTaskGrade');
+                gradeEl.textContent = gradeText;
+                gradeEl.className = (gradeText === '—' || gradeText.indexOf('Chưa') === 0)
+                    ? 'text-2xl font-bold text-gray-400'
+                    : 'text-2xl font-bold text-emerald-600';
+                document.getElementById('modalTaskComment').textContent = data.comment || 'Chưa có nhận xét';
             }
-            var gradeEl = document.getElementById('modalTaskGrade');
-            gradeEl.textContent = gradeText;
-            gradeEl.className = (gradeText === '—' || gradeText.indexOf('Chưa') === 0)
-                ? 'text-2xl font-bold text-gray-400'
-                : 'text-2xl font-bold text-emerald-600';
-            document.getElementById('modalTaskComment').textContent = data.comment || 'Chưa có nhận xét';
             fillProofs(data.proofs || []);
         }).catch(function () {
             setLoading(false);

@@ -519,6 +519,113 @@ class AddMembersForm(forms.Form):
         self.fields['member_ids'].queryset = qs.prefetch_related('my_departments')
 
 
+class AddTaskPerformersForm(forms.Form):
+    """Người giao / BGH thêm cá nhân hoặc Tổ/Nhóm vào công việc đã giao."""
+
+    EXEC_LEADER = TaskAssignForm.EXEC_LEADER
+    EXEC_ALL_MEMBERS = TaskAssignForm.EXEC_ALL_MEMBERS
+
+    assignees = forms.ModelMultipleChoiceField(
+        queryset=User.objects.none(),
+        required=False,
+        label='Thêm cá nhân',
+        widget=forms.MultipleHiddenInput,
+    )
+    departments = forms.ModelMultipleChoiceField(
+        queryset=Department.objects.none(),
+        required=False,
+        label='Thêm Tổ/Nhóm',
+        widget=forms.MultipleHiddenInput,
+    )
+    department_execution_mode = forms.ChoiceField(
+        choices=TaskAssignForm.EXEC_MODE_CHOICES,
+        initial=EXEC_LEADER,
+        required=False,
+        widget=forms.RadioSelect,
+        label='Cách thêm Tổ/Nhóm',
+    )
+
+    def __init__(self, *args, user=None, task=None, **kwargs):
+        self.user = user
+        self.task = task
+        super().__init__(*args, **kwargs)
+        assignee_qs = User.assignable_queryset_for(user).prefetch_related('my_departments')
+        dept_qs = Department.objects.select_related('leader').all()
+        if task is not None:
+            existing_user_ids = set(
+                task.assignments.filter(assignee_id__isnull=False).values_list(
+                    'assignee_id', flat=True
+                )
+            )
+            if task.batch_key:
+                existing_user_ids |= set(
+                    TaskAssignment.objects.filter(
+                        task__batch_key=task.batch_key,
+                        assignee_id__isnull=False,
+                    ).values_list('assignee_id', flat=True)
+                )
+            if existing_user_ids:
+                assignee_qs = assignee_qs.exclude(pk__in=existing_user_ids)
+            existing_dept_ids = set(
+                task.assignments.filter(
+                    assignee_department_id__isnull=False
+                ).values_list('assignee_department_id', flat=True)
+            )
+            if task.primary_department_id:
+                existing_dept_ids.add(task.primary_department_id)
+            existing_dept_ids |= set(
+                task.coordinating_departments.values_list('pk', flat=True)
+            )
+            if existing_dept_ids:
+                dept_qs = dept_qs.exclude(pk__in=existing_dept_ids)
+        self.fields['assignees'].queryset = assignee_qs
+        self.fields['departments'].queryset = dept_qs
+
+    @staticmethod
+    def _validate_dept_leader(dept):
+        if not dept.leader_id:
+            raise forms.ValidationError(
+                f'Tổ/Nhóm "{dept.name}" chưa có Trưởng tổ. Vui lòng chỉ định Trưởng tổ trước.'
+            )
+        leader = dept.leader
+        if not leader.is_active or leader.is_director:
+            raise forms.ValidationError(
+                f'Trưởng tổ của "{dept.name}" không hợp lệ '
+                f'(cần tài khoản Tổ chuyên môn / Giáo viên đang hoạt động).'
+            )
+        return leader
+
+    def clean(self):
+        cleaned = super().clean()
+        assignees = list(cleaned.get('assignees') or [])
+        departments = list(cleaned.get('departments') or [])
+        if not assignees and not departments:
+            raise forms.ValidationError(
+                'Vui lòng chọn ít nhất một cá nhân hoặc một Tổ/Nhóm để thêm.'
+            )
+        exec_mode = cleaned.get('department_execution_mode') or self.EXEC_LEADER
+        if exec_mode not in {self.EXEC_LEADER, self.EXEC_ALL_MEMBERS}:
+            exec_mode = self.EXEC_LEADER
+        cleaned['department_execution_mode'] = exec_mode
+
+        if departments and exec_mode == self.EXEC_LEADER:
+            for dept in departments:
+                self._validate_dept_leader(dept)
+        elif departments and exec_mode == self.EXEC_ALL_MEMBERS:
+            empty = []
+            for dept in departments:
+                members = dept.members.filter(is_active=True).exclude(
+                    role=User.ROLE_DIRECTOR
+                )
+                if not members.exists():
+                    empty.append(dept.name)
+            if empty:
+                raise forms.ValidationError(
+                    'Các Tổ/Nhóm chưa có thành viên để thêm: ' + ', '.join(empty)
+                )
+        return cleaned
+
+
 class InternalEvaluationForm(forms.Form):
     """Trưởng tổ Chủ trì đánh giá từng cá nhân sau khi Task được nghiệm thu."""
 

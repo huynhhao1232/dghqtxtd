@@ -284,6 +284,86 @@
     </div>
     {% endif %}
 
+    {% if can_add_performers %}
+    <div id="add-performers" class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden scroll-mt-20">
+        <div class="px-5 py-4 border-b border-gray-100">
+            <h2 class="text-base font-semibold text-gray-800">
+                <i class="fas fa-user-plus text-primary mr-2"></i>Thêm người / tổ thực hiện
+            </h2>
+            <p class="text-xs text-gray-500 mt-1">
+                Chỉ người giao việc hoặc Ban Giám đốc được thêm. Cá nhân mới nhận thông báo;
+                Tổ/Nhóm mặc định giao Trưởng tổ điều phối (có thể chọn mọi thành viên).
+            </p>
+        </div>
+        <form method="post" action="{% url 'manager_task_add_performers' task.pk %}" class="p-5 space-y-5" id="add-performers-form">
+            {% csrf_token %}
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                    <i class="fas fa-user mr-1 text-blue-600"></i> Thêm cá nhân
+                </label>
+                <div class="relative" id="add-assignee-picker">
+                    <div id="add-selected-tags" class="flex flex-wrap gap-2 mb-2 min-h-[2px]"></div>
+                    <div class="relative">
+                        <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                        <input type="text" id="add-assignee-search" autocomplete="off"
+                               placeholder="Tìm và chọn nhân viên..."
+                               class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl bg-white hover:border-blue-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition text-sm">
+                    </div>
+                    <div id="add-assignee-dropdown"
+                         class="hidden absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto"></div>
+                </div>
+                <div id="add-assignee-hidden"></div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1.5">
+                    <i class="fas fa-users mr-1 text-teal-600"></i> Thêm Tổ/Nhóm
+                </label>
+                <div class="relative" id="add-dept-picker">
+                    <div id="add-dept-tags" class="flex flex-wrap gap-2 mb-2 min-h-[2px]"></div>
+                    <div class="relative">
+                        <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                        <input type="text" id="add-dept-search" autocomplete="off"
+                               placeholder="Tìm và chọn Tổ/Nhóm..."
+                               class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl bg-white hover:border-teal-300 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none transition text-sm">
+                    </div>
+                    <div id="add-dept-dropdown"
+                         class="hidden absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto"></div>
+                </div>
+                <div id="add-dept-hidden"></div>
+
+                <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3" id="add-exec-mode-cards">
+                    <label class="add-exec-card relative flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition border-blue-400 bg-blue-50/80"
+                           data-exec="leader_coordinate">
+                        <input type="radio" name="department_execution_mode" value="leader_coordinate"
+                               class="sr-only" checked>
+                        <span class="min-w-0">
+                            <span class="block text-sm font-semibold text-gray-900">Trưởng tổ điều phối</span>
+                            <span class="block text-xs text-gray-500 mt-0.5">Thêm tổ như bản phân công độc lập (mặc định).</span>
+                        </span>
+                    </label>
+                    <label class="add-exec-card relative flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition border-gray-200 bg-white hover:border-gray-300"
+                           data-exec="all_members">
+                        <input type="radio" name="department_execution_mode" value="all_members"
+                               class="sr-only">
+                        <span class="min-w-0">
+                            <span class="block text-sm font-semibold text-gray-900">Mọi thành viên</span>
+                            <span class="block text-xs text-gray-500 mt-0.5">Thêm từng thành viên trong tổ đã chọn.</span>
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-2 border-t border-gray-100">
+                <button type="submit"
+                        class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-primary text-white hover:bg-blue-800 shadow-sm">
+                    <i class="fas fa-plus"></i> Thêm người nhận
+                </button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+
     {% if task.is_team_task %}
     <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div class="px-5 py-4 border-b border-gray-100">
@@ -453,5 +533,177 @@
         el.addEventListener('click', closeModal);
     });
 })();
+
+{% if can_add_performers %}
+(function () {
+    var STAFF = {{ staff_options_json|safe }};
+    var DEPTS = {{ dept_options_json|safe }};
+    var selectedUsers = new Set();
+    var selectedDepts = new Set();
+
+    var searchInput = document.getElementById('add-assignee-search');
+    var dropdown = document.getElementById('add-assignee-dropdown');
+    var tagsEl = document.getElementById('add-selected-tags');
+    var hiddenEl = document.getElementById('add-assignee-hidden');
+    var deptSearch = document.getElementById('add-dept-search');
+    var deptDropdown = document.getElementById('add-dept-dropdown');
+    var deptTags = document.getElementById('add-dept-tags');
+    var deptHidden = document.getElementById('add-dept-hidden');
+
+    function syncUserHidden() {
+        if (!hiddenEl) return;
+        hiddenEl.innerHTML = '';
+        selectedUsers.forEach(function (id) {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'assignees';
+            input.value = id;
+            hiddenEl.appendChild(input);
+        });
+    }
+    function syncDeptHidden() {
+        if (!deptHidden) return;
+        deptHidden.innerHTML = '';
+        selectedDepts.forEach(function (id) {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'departments';
+            input.value = id;
+            deptHidden.appendChild(input);
+        });
+    }
+    function renderUserTags() {
+        if (!tagsEl) return;
+        tagsEl.innerHTML = '';
+        STAFF.filter(function (u) { return selectedUsers.has(String(u.id)); }).forEach(function (u) {
+            var tag = document.createElement('span');
+            tag.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-blue-50 text-blue-800 ring-1 ring-blue-600/15';
+            tag.innerHTML = '<img src="' + u.avatar + '" class="w-4 h-4 rounded-full" alt="">' +
+                '<span></span><button type="button" class="text-blue-400 hover:text-blue-700" data-uid="' + u.id + '">&times;</button>';
+            tag.querySelector('span').textContent = u.name;
+            tag.querySelector('button').addEventListener('click', function () {
+                selectedUsers.delete(String(u.id));
+                renderUserTags();
+                syncUserHidden();
+            });
+            tagsEl.appendChild(tag);
+        });
+        syncUserHidden();
+    }
+    function renderDeptTags() {
+        if (!deptTags) return;
+        deptTags.innerHTML = '';
+        DEPTS.filter(function (d) { return selectedDepts.has(String(d.id)); }).forEach(function (d) {
+            var tag = document.createElement('span');
+            tag.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-teal-50 text-teal-800 ring-1 ring-teal-600/15';
+            tag.innerHTML = '<span></span><button type="button" class="text-teal-400 hover:text-teal-700" data-did="' + d.id + '">&times;</button>';
+            tag.querySelector('span').textContent = d.name;
+            tag.querySelector('button').addEventListener('click', function () {
+                selectedDepts.delete(String(d.id));
+                renderDeptTags();
+                syncDeptHidden();
+            });
+            deptTags.appendChild(tag);
+        });
+        syncDeptHidden();
+    }
+    function showUserDropdown(q) {
+        if (!dropdown) return;
+        var query = (q || '').toLowerCase().trim();
+        var items = STAFF.filter(function (u) {
+            if (selectedUsers.has(String(u.id))) return false;
+            if (!query) return true;
+            return (u.name + ' ' + u.username + ' ' + (u.department || '')).toLowerCase().indexOf(query) !== -1;
+        }).slice(0, 20);
+        if (!items.length) {
+            dropdown.classList.add('hidden');
+            dropdown.innerHTML = '';
+            return;
+        }
+        dropdown.innerHTML = items.map(function (u) {
+            return '<button type="button" class="w-full text-left px-3 py-2.5 hover:bg-blue-50 flex items-center gap-3" data-uid="' + u.id + '">' +
+                '<img src="' + u.avatar + '" class="w-8 h-8 rounded-full object-cover" alt="">' +
+                '<span class="min-w-0"><span class="block text-sm font-medium text-gray-900"></span>' +
+                '<span class="block text-xs text-gray-400"></span></span></button>';
+        }).join('');
+        Array.prototype.forEach.call(dropdown.children, function (btn, i) {
+            var u = items[i];
+            btn.querySelector('.text-sm').textContent = u.name;
+            btn.querySelector('.text-xs').textContent = (u.department || u.username);
+            btn.addEventListener('click', function () {
+                selectedUsers.add(String(u.id));
+                renderUserTags();
+                searchInput.value = '';
+                dropdown.classList.add('hidden');
+            });
+        });
+        dropdown.classList.remove('hidden');
+    }
+    function showDeptDropdown(q) {
+        if (!deptDropdown) return;
+        var query = (q || '').toLowerCase().trim();
+        var items = DEPTS.filter(function (d) {
+            if (selectedDepts.has(String(d.id))) return false;
+            if (!query) return true;
+            return (d.name + ' ' + (d.leader || '')).toLowerCase().indexOf(query) !== -1;
+        }).slice(0, 20);
+        if (!items.length) {
+            deptDropdown.classList.add('hidden');
+            deptDropdown.innerHTML = '';
+            return;
+        }
+        deptDropdown.innerHTML = items.map(function (d) {
+            return '<button type="button" class="w-full text-left px-3 py-2.5 hover:bg-teal-50" data-did="' + d.id + '">' +
+                '<span class="block text-sm font-medium text-gray-900"></span>' +
+                '<span class="block text-xs text-gray-400"></span></button>';
+        }).join('');
+        Array.prototype.forEach.call(deptDropdown.children, function (btn, i) {
+            var d = items[i];
+            btn.querySelector('.text-sm').textContent = d.name;
+            btn.querySelector('.text-xs').textContent = d.leader ? ('Trưởng tổ: ' + d.leader) : 'Chưa có Trưởng tổ';
+            btn.addEventListener('click', function () {
+                selectedDepts.add(String(d.id));
+                renderDeptTags();
+                deptSearch.value = '';
+                deptDropdown.classList.add('hidden');
+            });
+        });
+        deptDropdown.classList.remove('hidden');
+    }
+
+    if (searchInput) {
+        searchInput.addEventListener('focus', function () { showUserDropdown(searchInput.value); });
+        searchInput.addEventListener('input', function () { showUserDropdown(searchInput.value); });
+    }
+    if (deptSearch) {
+        deptSearch.addEventListener('focus', function () { showDeptDropdown(deptSearch.value); });
+        deptSearch.addEventListener('input', function () { showDeptDropdown(deptSearch.value); });
+    }
+    document.addEventListener('click', function (e) {
+        var picker = document.getElementById('add-assignee-picker');
+        var dpicker = document.getElementById('add-dept-picker');
+        if (picker && !picker.contains(e.target) && dropdown) dropdown.classList.add('hidden');
+        if (dpicker && !dpicker.contains(e.target) && deptDropdown) deptDropdown.classList.add('hidden');
+    });
+
+    document.querySelectorAll('.add-exec-card').forEach(function (card) {
+        card.addEventListener('click', function () {
+            document.querySelectorAll('.add-exec-card').forEach(function (c) {
+                c.className = 'add-exec-card relative flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition border-gray-200 bg-white hover:border-gray-300';
+                var r = c.querySelector('input[type=radio]');
+                if (r) r.checked = false;
+            });
+            card.className = 'add-exec-card relative flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition border-blue-400 bg-blue-50/80';
+            var radio = card.querySelector('input[type=radio]');
+            if (radio) radio.checked = true;
+        });
+    });
+
+    if (window.location.hash === '#add-performers') {
+        var section = document.getElementById('add-performers');
+        if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+})();
+{% endif %}
 </script>
 {% endblock %}
