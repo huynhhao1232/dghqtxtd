@@ -32,6 +32,7 @@ class UserAdmin(DjangoUserAdmin):
         'is_manager',
         'is_active',
     )
+    list_editable = ('role',)
     list_filter = ('role', 'is_manager', 'is_active')
     search_fields = ('username', 'first_name', 'last_name', 'email')
     fieldsets = DjangoUserAdmin.fieldsets + (
@@ -61,3 +62,8 @@ class UserAdmin(DjangoUserAdmin):
             },
         ),
     )
+
+    def save_model(self, request, obj, form, change):
+        # Keep legacy is_manager in sync with app role (also enforced in User.save).
+        obj.is_manager = obj.role == User.ROLE_DIRECTOR
+        super().save_model(request, obj, form, change)

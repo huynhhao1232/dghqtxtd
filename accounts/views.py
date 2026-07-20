@@ -268,7 +268,7 @@ def manager_staff_list(request):
 
     if request.method == 'GET' and request.GET.get('action') == 'edit' and staff_id:
         edit_user = get_object_or_404(User, pk=staff_id)
-        edit_form = StaffEditForm(instance=edit_user)
+        edit_form = StaffEditForm(instance=edit_user, actor=request.user)
 
     if request.method == 'POST':
         if action == 'create':
@@ -285,7 +285,7 @@ def manager_staff_list(request):
                 return redirect('manager_staff')
         elif action == 'edit' and staff_id:
             edit_user = get_object_or_404(User, pk=staff_id)
-            edit_form = StaffEditForm(request.POST, instance=edit_user)
+            edit_form = StaffEditForm(request.POST, instance=edit_user, actor=request.user)
             if edit_form.is_valid():
                 edit_form.save()
                 messages.success(request, f'Đã cập nhật viên chức "{edit_user}".')

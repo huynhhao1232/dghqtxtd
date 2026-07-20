@@ -131,6 +131,10 @@ class DepartmentForm(forms.ModelForm):
         dept = super().save(commit=commit)
         if commit:
             dept.ensure_leader_is_member()
+            if dept.leader_id:
+                User.objects.filter(pk=dept.leader_id).exclude(
+                    role=User.ROLE_DIRECTOR,
+                ).update(role=User.ROLE_DEPARTMENT)
         return dept
 
 
@@ -142,6 +146,11 @@ EDIT_INPUT_CLASS = (
 
 
 class StaffEditForm(forms.ModelForm):
+    role = forms.ChoiceField(
+        choices=User.ROLE_CHOICES,
+        label='Vai trò',
+        widget=forms.Select(attrs={'class': EDIT_INPUT_CLASS}),
+    )
     full_name = forms.CharField(
         label='Họ và tên',
         max_length=150,
@@ -158,7 +167,7 @@ class StaffEditForm(forms.ModelForm):
 
     class Meta:
         model = User
-        fields = ('email', 'phone', 'position', 'is_active')
+        fields = ('role', 'email', 'phone', 'position', 'is_active')
         widgets = {
             'email': forms.EmailInput(
                 attrs={'class': EDIT_INPUT_CLASS, 'placeholder': 'email@example.com'}
@@ -174,9 +183,10 @@ class StaffEditForm(forms.ModelForm):
             ),
         }
 
-    field_order = ('full_name', 'email', 'phone', 'departments', 'position', 'is_active')
+    field_order = ('role', 'full_name', 'email', 'phone', 'departments', 'position', 'is_active')
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, actor=None, **kwargs):
+        self.actor = actor
         super().__init__(*args, **kwargs)
         self.order_fields(self.field_order)
         self.fields['departments'].queryset = Department.objects.all()
@@ -184,12 +194,40 @@ class StaffEditForm(forms.ModelForm):
             from .vietnamese import user_display_full_name
             self.fields['full_name'].initial = user_display_full_name(self.instance)
             self.fields['departments'].initial = self.instance.my_departments.all()
+            self.fields['role'].initial = self.instance.role
+
+    def clean_role(self):
+        role = self.cleaned_data['role']
+        user = self.instance
+        if not user or not user.pk:
+            return role
+        was_director = user.role == User.ROLE_DIRECTOR
+        becoming_non_director = role != User.ROLE_DIRECTOR
+        if was_director and becoming_non_director:
+            actor = self.actor
+            if actor is not None and actor.pk == user.pk:
+                raise forms.ValidationError(
+                    'Bạn không thể tự hạ vai trò Ban Giám đốc của chính mình.'
+                )
+            other_directors = (
+                User.objects.filter(role=User.ROLE_DIRECTOR, is_active=True)
+                .exclude(pk=user.pk)
+                .exists()
+            )
+            if not other_directors:
+                raise forms.ValidationError(
+                    'Không thể hạ vai trò Ban Giám đốc cuối cùng còn hoạt động.'
+                )
+        return role
 
     def save(self, commit=True):
         user = super().save(commit=False)
         full_name = self.cleaned_data['full_name'].strip()
         user.first_name = full_name
         user.last_name = ''
+        role = self.cleaned_data.get('role', user.role)
+        user.role = role
+        user.is_manager = role == User.ROLE_DIRECTOR
         if commit:
             user.save()
             user.my_departments.set(self.cleaned_data.get('departments') or [])
