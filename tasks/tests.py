@@ -1094,3 +1094,131 @@ class RoleBasedAccessControlTestCase(TestCase):
         staff_asg = _staff_assignments_qs(self.staff_user)
         self.assertTrue(staff_asg.filter(task=mine).exists())
         self.assertFalse(staff_asg.filter(task=others).exists())
+
+
+class StaffTaskDetailOversightTestCase(TestCase):
+    """
+    Trưởng tổ / role Tổ sau khi giao-chuyển việc cho thành viên vẫn mở được
+    /staff/tasks/<assignment_pk>/ (trước đây 404 vì _get_staff_assignment
+    chỉ lọc assignee=request.user).
+    """
+
+    def setUp(self):
+        self.today = timezone.localdate()
+        self.client = Client()
+        self.director = User.objects.create_user(
+            username='dir_oversight',
+            password='x',
+            is_manager=True,
+            first_name='Giám',
+            last_name='Đốc',
+        )
+        self.leader = User.objects.create_user(
+            username='leader_oversight',
+            password='x',
+            role=User.ROLE_DEPARTMENT,
+            first_name='Trưởng',
+            last_name='Tổ',
+        )
+        self.member = User.objects.create_user(
+            username='member_oversight',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='Thành',
+            last_name='Viên',
+        )
+        self.outsider = User.objects.create_user(
+            username='out_oversight',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='Ngoài',
+            last_name='Tổ',
+        )
+        self.dept = Department.objects.create(name='Tổ Oversight', leader=self.leader)
+        self.dept.members.add(self.leader, self.member)
+
+        self.task = Task.objects.create(
+            title='Việc nội bộ đã chuyển giao',
+            created_by=self.leader,
+            primary_department=self.dept,
+            deadline=self.today + timedelta(days=7),
+            cycle=Task.CYCLE_MONTH,
+        )
+        # Chỉ giao cho thành viên (trưởng tổ không còn là assignee)
+        self.member_asg = TaskAssignment.objects.create(
+            task=self.task,
+            assignee=self.member,
+        )
+
+        # Việc cá nhân (không phải team) sau khi trưởng tổ chuyển giao
+        self.personal_task = Task.objects.create(
+            title='Việc cá nhân đã chuyển',
+            created_by=self.director,
+            deadline=self.today + timedelta(days=5),
+            cycle=Task.CYCLE_MONTH,
+        )
+        self.personal_asg = TaskAssignment.objects.create(
+            task=self.personal_task,
+            assignee=self.member,
+        )
+
+    def test_leader_can_open_member_assignment_after_reassign(self):
+        self.client.force_login(self.leader)
+        resp = self.client.get(
+            reverse('staff_task_detail', kwargs={'pk': self.member_asg.pk})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, self.task.title)
+        # Team task: Trưởng tổ Chủ trì vẫn được cập nhật (canonical)
+        self.assertTrue(resp.context['can_update'])
+
+    def test_leader_can_open_via_task_pk(self):
+        self.client.force_login(self.leader)
+        resp = self.client.get(
+            reverse('staff_task_detail', kwargs={'pk': self.task.pk})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context['my_assignment'].pk, self.member_asg.pk)
+
+    def test_leader_readonly_on_personal_reassigned_task(self):
+        self.client.force_login(self.leader)
+        resp = self.client.get(
+            reverse('staff_task_detail', kwargs={'pk': self.personal_asg.pk})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.context['can_update'])
+
+    def test_member_can_still_update_own_personal_assignment(self):
+        self.client.force_login(self.member)
+        resp = self.client.get(
+            reverse('staff_task_detail', kwargs={'pk': self.personal_asg.pk})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context['can_update'])
+
+    def test_outsider_still_404(self):
+        self.client.force_login(self.outsider)
+        resp = self.client.get(
+            reverse('staff_task_detail', kwargs={'pk': self.member_asg.pk})
+        )
+        self.assertEqual(resp.status_code, 404)
+
+    def test_director_redirects_to_manager_task_detail(self):
+        self.client.force_login(self.director)
+        resp = self.client.get(
+            reverse('staff_task_detail', kwargs={'pk': self.member_asg.pk})
+        )
+        self.assertRedirects(
+            resp,
+            reverse('manager_task_detail', kwargs={'pk': self.task.pk}),
+        )
+
+    def test_department_kanban_action_links_member_assignment(self):
+        from accounts.views import _department_task_action
+
+        action = _department_task_action(self.task, self.leader, self.dept)
+        self.assertIsNotNone(action)
+        self.assertEqual(
+            action['url'],
+            reverse('staff_task_detail', args=[self.member_asg.pk]),
+        )

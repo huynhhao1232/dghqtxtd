@@ -7,7 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
-from django.http import HttpResponse, HttpResponseForbidden, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -59,13 +59,9 @@ def _staff_assignment_q(user):
     return Q(assignee=user) | Q(assignee_department__leader=user)
 
 
-def _staff_assignments_qs(user):
-    """
-    Cô lập danh sách việc theo role:
-    - department: việc họ tạo HOẶC được giao
-    - staff: chỉ việc được giao (assignee / trưởng tổ nhận theo tổ)
-    """
-    qs = TaskAssignment.objects.select_related(
+def _assignment_detail_qs():
+    """Base queryset cho trang chi tiết assignment (select/prefetch đủ quan hệ)."""
+    return TaskAssignment.objects.select_related(
         'task',
         'task__created_by',
         'task__primary_department',
@@ -79,6 +75,15 @@ def _staff_assignments_qs(user):
         'task__coordinating_departments',
         'task__coordinating_departments__leader',
     )
+
+
+def _staff_assignments_qs(user):
+    """
+    Cô lập danh sách việc theo role:
+    - department: việc họ tạo HOẶC được giao
+    - staff: chỉ việc được giao (assignee / trưởng tổ nhận theo tổ)
+    """
+    qs = _assignment_detail_qs()
     if getattr(user, 'is_department', False):
         qs = qs.filter(Q(task__created_by=user) | _staff_assignment_q(user))
     else:
@@ -86,8 +91,80 @@ def _staff_assignments_qs(user):
     return qs.distinct()
 
 
+def _is_direct_staff_assignee(assignment, user):
+    """True nếu user là người nhận (cá nhân) hoặc Trưởng tổ của bản giao theo tổ."""
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+    if assignment.assignee_id == user.id:
+        return True
+    dept = assignment.assignee_department
+    return bool(dept and dept.leader_id == user.id)
+
+
+def _user_oversees_assignment(user, assignment):
+    """
+    Được xem chi tiết assignment nếu:
+    - là assignee / trưởng tổ bản giao theo tổ, hoặc
+    - Ban Giám đốc, hoặc
+    - Trưởng tổ Chủ trì/Phối hợp của task, hoặc
+    - Trưởng tổ của tổ chứa người được giao (sau khi chuyển giao nội bộ), hoặc
+    - role Tổ chuyên môn tạo task / dẫn primary_department.
+    """
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+    if getattr(user, 'is_director', False) or getattr(user, 'is_manager', False):
+        return True
+    if _is_direct_staff_assignee(assignment, user):
+        return True
+
+    task = assignment.task
+    if task.is_department_leader(user):
+        return True
+
+    if assignment.assignee_id and user.led_departments.filter(
+        members=assignment.assignee,
+    ).exists():
+        return True
+
+    if getattr(user, 'is_department', False):
+        if task.created_by_id == user.id:
+            return True
+        primary = task.primary_department
+        if primary and primary.leader_id == user.id:
+            return True
+
+    return False
+
+
 def _get_staff_assignment(request, pk):
-    return get_object_or_404(_staff_assignments_qs(request.user), pk=pk)
+    """
+    Resolve TaskAssignment cho staff detail.
+    Chấp nhận pk là TaskAssignment.id; nếu không khớp, thử pk là Task.id
+    (link Kanban/nhầm id) rồi chọn assignment user được phép xem.
+    """
+    user = request.user
+    qs = _assignment_detail_qs()
+
+    assignment = qs.filter(pk=pk).first()
+    if assignment and _user_oversees_assignment(user, assignment):
+        return assignment
+
+    task = Task.objects.filter(pk=pk).first()
+    if task:
+        candidates = list(qs.filter(task=task).order_by('pk'))
+        for candidate in candidates:
+            if _is_direct_staff_assignee(candidate, user):
+                return candidate
+        for candidate in candidates:
+            if _user_oversees_assignment(user, candidate):
+                return candidate
+
+    raise Http404('No TaskAssignment matches the given query.')
+
+
+def _manager_root_task_pk(task):
+    """manager_task_detail chỉ nhận task gốc (không phải sub-task)."""
+    return task.parent_task_id or task.pk
 
 
 def _batch_department_for_assignment(assignment, user):
@@ -248,7 +325,14 @@ def staff_my_tasks(request):
 @login_required
 @require_http_methods(['GET', 'POST'])
 def staff_task_detail(request, pk):
+    # Ban Giám đốc → trang quản lý (không dùng staff detail)
     if request.user.is_director or request.user.is_manager:
+        asg = TaskAssignment.objects.select_related('task').filter(pk=pk).first()
+        if asg:
+            return redirect('manager_task_detail', pk=_manager_root_task_pk(asg.task))
+        task = Task.objects.filter(pk=pk).first()
+        if task:
+            return redirect('manager_task_detail', pk=_manager_root_task_pk(task))
         return redirect('manager_dashboard')
 
     assignment = _get_staff_assignment(request, pk)
@@ -259,10 +343,19 @@ def staff_task_detail(request, pk):
     batch_dept = _batch_department_for_assignment(assignment, request.user)
     is_batch_department_leader = batch_dept is not None
     is_delegated = task.delegated_updater_id == request.user.id
+    is_direct_assignee = _is_direct_staff_assignee(assignment, request.user)
 
+    # Assignee / delegated / Trưởng tổ Chủ trì|batch được cập nhật.
+    # Overseer chỉ vì thành viên thuộc tổ mình (sau chuyển giao) → chỉ xem.
     can_update = (
         assignment.status != TaskAssignment.STATUS_COMPLETED
         and task.can_update_progress(request.user)
+        and (
+            is_direct_assignee
+            or is_delegated
+            or is_primary_leader
+            or is_batch_department_leader
+        )
     )
     can_submit_coord_proof = (
         task.is_team_task

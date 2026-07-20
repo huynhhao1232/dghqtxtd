@@ -365,10 +365,19 @@ def _department_tasks_queryset(department):
     )
 
 
-def _department_task_action(task, user):
+def _department_task_action(task, user, department=None):
     """Nút hành động theo role: nghiệm thu (lãnh đạo/tổ) hoặc cập nhật tiến độ (assignee)."""
     assignments = list(task.assignments.all())
     my_asg = next((a for a in assignments if a.assignee_id == user.id), None)
+    if my_asg is None:
+        my_asg = next(
+            (
+                a for a in assignments
+                if a.assignee_department_id
+                and a.assignee_department.leader_id == user.id
+            ),
+            None,
+        )
     pending = next(
         (a for a in assignments if a.status == TaskAssignment.STATUS_PENDING),
         None,
@@ -387,15 +396,31 @@ def _department_task_action(task, user):
             'kind': 'review',
         }
 
-    if user.is_department:
-        target = pending or my_asg or (assignments[0] if assignments else None)
+    is_dept_overseer = (
+        user.is_department
+        or (department is not None and department.leader_id == user.id)
+    )
+    if is_dept_overseer:
+        # Ưu tiên assignment của chính trưởng tổ; nếu đã chuyển giao → xem bản của thành viên.
+        if my_asg:
+            return {
+                'label': 'Cập nhật tiến độ',
+                'url': reverse('staff_task_detail', args=[my_asg.pk]),
+                'kind': 'progress',
+            }
+        target = pending or (assignments[0] if assignments else None)
         if target:
             return {
-                'label': 'Nghiệm thu / Chấm điểm',
+                'label': 'Xem chi tiết',
                 'url': reverse('staff_task_detail', args=[target.pk]),
                 'kind': 'review',
             }
-        return None
+        # Fallback: pk Task — staff_task_detail sẽ resolve sang assignment phù hợp.
+        return {
+            'label': 'Xem chi tiết',
+            'url': reverse('staff_task_detail', args=[task.pk]),
+            'kind': 'review',
+        }
 
     if my_asg:
         return {
@@ -654,7 +679,7 @@ def department_interaction(request, dept_id):
             'task': enriched,
             'assignees': assignees,
             'primary_assignee': assignees[0] if assignees else None,
-            'action': _department_task_action(task, request.user),
+            'action': _department_task_action(task, request.user, department),
             'kanban_column': col,
             'can_drag': can_drag,
         }
