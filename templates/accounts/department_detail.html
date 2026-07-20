@@ -3,7 +3,7 @@
 {% block title %}{{ department.name }} — Workspace{% endblock %}
 
 {% block content %}
-<div class="max-w-6xl mx-auto space-y-5">
+<div class="max-w-7xl mx-auto space-y-5">
 
     {# ── Header card ── #}
     <div class="bg-white rounded-2xl shadow-sm p-6 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -25,7 +25,7 @@
                 {% endif %}
             </p>
         </div>
-        {% if request.user.role == 'department' or request.user.is_director or request.user.is_department %}
+        {% if can_assign %}
         <button type="button" id="btn-open-assign-modal"
                 class="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold
                        bg-primary text-white hover:bg-blue-800 shadow-sm transition-colors shrink-0">
@@ -36,143 +36,49 @@
     </div>
 
     {# ── Quick stats ── #}
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-            <div class="flex items-center justify-between">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Đang thực hiện</p>
-                <span class="w-9 h-9 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
-                    <i class="fas fa-spinner"></i>
-                </span>
-            </div>
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Cần làm</p>
+            <p class="text-3xl font-bold text-gray-700 mt-2">{{ stats.todo }}</p>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Đang làm</p>
             <p class="text-3xl font-bold text-sky-700 mt-2">{{ stats.in_progress }}</p>
         </div>
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-            <div class="flex items-center justify-between">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Chờ nghiệm thu</p>
-                <span class="w-9 h-9 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
-                    <i class="fas fa-hourglass-half"></i>
-                </span>
-            </div>
-            <p class="text-3xl font-bold text-amber-600 mt-2">{{ stats.pending }}</p>
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Chờ nghiệm thu / Xong</p>
+            <p class="text-3xl font-bold text-amber-600 mt-2">{{ kanban_done|length }}</p>
         </div>
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-            <div class="flex items-center justify-between">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Quá hạn</p>
-                <span class="w-9 h-9 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
-                    <i class="fas fa-exclamation-triangle"></i>
-                </span>
-            </div>
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Quá hạn</p>
             <p class="text-3xl font-bold text-red-600 mt-2">{{ stats.overdue }}</p>
         </div>
     </div>
 
-    {# ── Department task list ── #}
-    <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
-            <h2 class="text-sm font-semibold text-gray-800 uppercase tracking-wide">
-                <i class="fas fa-tasks text-primary mr-1.5"></i>
-                Nhiệm vụ nhóm
-            </h2>
-            <span class="text-xs text-gray-400">{{ task_rows|length }} công việc</span>
-        </div>
+    {# ── Kanban board ── #}
+    <div class="flex gap-4 overflow-x-auto pb-4 min-h-[500px]" id="kanban-board"
+         data-status-url="{{ status_update_url }}"
+         data-can-drag="{{ can_drag_any|yesno:'1,0' }}">
 
-        <div class="overflow-x-auto">
-            <table class="min-w-full text-sm">
-                <thead class="bg-gray-50 border-b border-gray-100">
-                    <tr>
-                        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Công việc</th>
-                        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Người nhận</th>
-                        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Hạn</th>
-                        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[9rem]">Tiến độ</th>
-                        <th class="text-right px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Hành động</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-100">
-                    {% for row in task_rows %}
-                    <tr class="hover:bg-slate-50/80 transition">
-                        <td class="px-5 py-4 align-top">
-                            <p class="font-semibold text-gray-900 leading-snug">{{ row.task.title }}</p>
-                            <span class="inline-flex mt-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium {{ row.task.display_status_pill }}">
-                                {{ row.task.display_status_label }}
-                            </span>
-                        </td>
-                        <td class="px-5 py-4 align-top">
-                            {% if row.assignees %}
-                            <div class="flex flex-col gap-2">
-                                {% for person in row.assignees|slice:":3" %}
-                                <div class="flex items-center gap-2 min-w-0">
-                                    <img src="{{ person.avatar_url }}" alt=""
-                                         class="w-8 h-8 rounded-full object-cover border border-gray-200 shrink-0">
-                                    <span class="text-sm text-gray-800 truncate">{{ person }}</span>
-                                </div>
-                                {% endfor %}
-                                {% if row.assignees|length > 3 %}
-                                <span class="text-xs text-gray-400">và {{ row.assignees|length|add:"-3" }} người khác</span>
-                                {% endif %}
-                            </div>
-                            {% else %}
-                            <span class="text-xs text-gray-400">—</span>
-                            {% endif %}
-                        </td>
-                        <td class="px-5 py-4 align-top whitespace-nowrap">
-                            {% if row.task.row_is_overdue %}
-                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-50 text-red-700 text-xs font-semibold border border-red-100">
-                                <i class="fas fa-exclamation-circle"></i>
-                                {{ row.task.deadline|date:"d/m/Y" }}
-                            </span>
-                            {% else %}
-                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-50 text-gray-700 text-xs font-medium border border-gray-100">
-                                <i class="fas fa-calendar-alt text-gray-400"></i>
-                                {{ row.task.deadline|date:"d/m/Y" }}
-                            </span>
-                            {% endif %}
-                        </td>
-                        <td class="px-5 py-4 align-top">
-                            <div class="flex items-center gap-2 mb-1">
-                                <div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                                    <div class="h-full rounded-full transition-all {% if row.task.progress_pct >= 100 %}bg-emerald-500{% elif row.task.progress_pct >= 70 %}bg-amber-400{% elif row.task.progress_pct >= 40 %}bg-blue-500{% else %}bg-gray-400{% endif %}"
-                                         style="width: {{ row.task.progress_pct }}%"></div>
-                                </div>
-                                <span class="text-xs font-semibold text-gray-600 w-8 text-right">{{ row.task.progress_pct }}%</span>
-                            </div>
-                            <p class="text-[11px] text-gray-400">{{ row.task.progress_label }}</p>
-                        </td>
-                        <td class="px-5 py-4 align-top text-right">
-                            {% if row.action %}
-                            <a href="{{ row.action.url }}"
-                               class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors
-                                      {% if row.action.kind == 'review' %}text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100{% else %}text-blue-700 bg-blue-50 border-blue-200 hover:bg-blue-100{% endif %}">
-                                {% if row.action.kind == 'review' %}
-                                <i class="fas fa-clipboard-check"></i>
-                                {% else %}
-                                <i class="fas fa-edit"></i>
-                                {% endif %}
-                                {{ row.action.label }}
-                            </a>
-                            {% else %}
-                            <span class="text-xs text-gray-300">—</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="5" class="px-6 py-16 text-center text-gray-400">
-                            <i class="fas fa-inbox text-3xl mb-3 block text-gray-300"></i>
-                            <p class="text-sm font-medium text-gray-600">Chưa có nhiệm vụ nào</p>
-                            <p class="text-xs text-gray-400 mt-1">
-                                {% if can_assign %}
-                                Bấm «Giao việc nội bộ» để phân công thành viên trong tổ.
-                                {% else %}
-                                Chưa có công việc liên quan đến tổ này.
-                                {% endif %}
-                            </p>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+        {% include "accounts/_kanban_column.html" with column_id="kanban-todo" column_key="todo" column_title="Cần làm" column_hint="Chưa bắt đầu" column_rows=kanban_todo header_bg="bg-gray-100" header_text="text-gray-700" %}
+        {% include "accounts/_kanban_column.html" with column_id="kanban-in_progress" column_key="in_progress" column_title="Đang làm" column_hint="Đang thực hiện / Làm lại" column_rows=kanban_in_progress header_bg="bg-sky-50" header_text="text-sky-800" %}
+        {% include "accounts/_kanban_column.html" with column_id="kanban-done" column_key="done" column_title="Chờ nghiệm thu / Đã xong" column_hint="Chờ duyệt hoặc hoàn thành" column_rows=kanban_done header_bg="bg-emerald-50" header_text="text-emerald-800" %}
+
     </div>
+
+    {% if not task_rows %}
+    <div class="bg-white rounded-2xl border border-dashed border-gray-200 px-6 py-10 text-center -mt-2">
+        <i class="fas fa-inbox text-3xl mb-3 block text-gray-300"></i>
+        <p class="text-sm font-medium text-gray-600">Chưa có nhiệm vụ nào</p>
+        <p class="text-xs text-gray-400 mt-1">
+            {% if can_assign %}
+            Bấm «Giao việc nội bộ» để phân công thành viên trong tổ.
+            {% else %}
+            Chưa có công việc liên quan đến tổ này.
+            {% endif %}
+        </p>
+    </div>
+    {% endif %}
 </div>
 
 {% if can_assign %}
@@ -274,6 +180,65 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+(function () {
+    function getCookie(name) {
+        var match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)'));
+        return match ? decodeURIComponent(match[1]) : '';
+    }
+
+    var board = document.getElementById('kanban-board');
+    if (board && typeof Sortable !== 'undefined' && board.getAttribute('data-can-drag') === '1') {
+        var statusUrl = board.getAttribute('data-status-url');
+        var csrfToken = getCookie('csrftoken') || '{{ csrf_token }}';
+        var columns = board.querySelectorAll('.kanban-column-list');
+
+        columns.forEach(function (col) {
+            Sortable.create(col, {
+                group: 'shared',
+                animation: 150,
+                draggable: '.kanban-card[data-can-drag="1"]',
+                ghostClass: 'opacity-40',
+                chosenClass: 'ring-2 ring-blue-300',
+                onEnd: function (evt) {
+                    if (!evt.to || (evt.from === evt.to && evt.oldIndex === evt.newIndex)) return;
+                    var card = evt.item;
+                    var taskId = card.getAttribute('data-task-id');
+                    var newStatus = evt.to.getAttribute('data-status');
+                    if (!taskId || !newStatus) return;
+
+                    card.classList.add('opacity-70');
+                    fetch(statusUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': csrfToken,
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: JSON.stringify({ task_id: Number(taskId), status: newStatus }),
+                        credentials: 'same-origin'
+                    }).then(function (res) {
+                        return res.json().then(function (data) {
+                            return { ok: res.ok, data: data };
+                        });
+                    }).then(function (result) {
+                        card.classList.remove('opacity-70');
+                        if (!result.ok || !result.data.ok) {
+                            if (evt.from) evt.from.insertBefore(card, evt.from.children[evt.oldIndex] || null);
+                            alert((result.data && result.data.error) || 'Không cập nhật được trạng thái.');
+                        }
+                    }).catch(function () {
+                        card.classList.remove('opacity-70');
+                        if (evt.from) evt.from.insertBefore(card, evt.from.children[evt.oldIndex] || null);
+                        alert('Lỗi kết nối. Thử lại sau.');
+                    });
+                }
+            });
+        });
+    }
+})();
+</script>
 {% if can_assign %}
 <script>
 (function () {

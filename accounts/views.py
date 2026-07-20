@@ -422,6 +422,139 @@ def _department_task_assignees(task):
     return people
 
 
+# Kanban columns ↔ TaskAssignment.status
+# todo          → Cần làm          ← todo
+# in_progress   → Đang làm         ← in_progress, redo
+# done          → Chờ nghiệm thu / Đã xong ← pending_review, completed
+KANBAN_TODO = 'todo'
+KANBAN_IN_PROGRESS = 'in_progress'
+KANBAN_DONE = 'done'
+KANBAN_COLUMN_KEYS = (KANBAN_TODO, KANBAN_IN_PROGRESS, KANBAN_DONE)
+
+KANBAN_STATUS_TO_COLUMN = {
+    TaskAssignment.STATUS_TODO: KANBAN_TODO,
+    TaskAssignment.STATUS_IN_PROGRESS: KANBAN_IN_PROGRESS,
+    TaskAssignment.STATUS_REDO: KANBAN_IN_PROGRESS,
+    TaskAssignment.STATUS_PENDING: KANBAN_DONE,
+    TaskAssignment.STATUS_COMPLETED: KANBAN_DONE,
+}
+
+KANBAN_COLUMN_TO_STATUS = {
+    KANBAN_TODO: TaskAssignment.STATUS_TODO,
+    KANBAN_IN_PROGRESS: TaskAssignment.STATUS_IN_PROGRESS,
+    KANBAN_DONE: TaskAssignment.STATUS_PENDING,  # kéo sang Done → Chờ nghiệm thu
+}
+
+
+def _kanban_column_for_status(status):
+    return KANBAN_STATUS_TO_COLUMN.get(status, KANBAN_TODO)
+
+
+def _user_can_update_task_status(user, task, department):
+    """Trưởng tổ / Lãnh đạo / người được giao việc."""
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_director:
+        return True
+    if department.leader_id == user.id or (
+        user.is_department and department.user_can_access(user)
+    ):
+        return True
+    return any(a.assignee_id == user.id for a in task.assignments.all())
+
+
+def _assignments_to_update_for_user(user, task, department):
+    """Assignees cập nhật assignment của mình; lãnh đạo/trưởng tổ cập nhật tất cả."""
+    assignments = list(task.assignments.all())
+    if not assignments:
+        return []
+    if user.is_director or department.leader_id == user.id or (
+        user.is_department and department.user_can_access(user)
+    ):
+        return assignments
+    return [a for a in assignments if a.assignee_id == user.id]
+
+
+@login_required
+@require_POST
+def update_task_status_api(request, dept_id):
+    """
+    POST JSON {task_id, status} — status là cột Kanban: todo | in_progress | done
+    (hoặc giá trị TaskAssignment.status trực tiếp).
+    """
+    department = get_object_or_404(Department, pk=dept_id)
+    if not department.user_can_access(request.user):
+        return JsonResponse({'ok': False, 'error': 'Không có quyền truy cập tổ này.'}, status=403)
+
+    try:
+        payload = json.loads(request.body.decode('utf-8') or '{}')
+    except (TypeError, ValueError, UnicodeDecodeError):
+        payload = {}
+
+    task_id = payload.get('task_id') or request.POST.get('task_id')
+    raw_status = (payload.get('status') or request.POST.get('status') or '').strip()
+
+    if not task_id or not raw_status:
+        return JsonResponse({'ok': False, 'error': 'Thiếu task_id hoặc status.'}, status=400)
+
+    if raw_status in KANBAN_COLUMN_TO_STATUS:
+        new_status = KANBAN_COLUMN_TO_STATUS[raw_status]
+        kanban_col = raw_status
+    elif raw_status in dict(TaskAssignment.STATUS_CHOICES):
+        new_status = raw_status
+        kanban_col = _kanban_column_for_status(raw_status)
+    else:
+        return JsonResponse({'ok': False, 'error': 'Trạng thái không hợp lệ.'}, status=400)
+
+    task = (
+        _department_tasks_queryset(department)
+        .filter(pk=task_id)
+        .first()
+    )
+    if not task:
+        return JsonResponse({'ok': False, 'error': 'Không tìm thấy nhiệm vụ.'}, status=404)
+
+    if not _user_can_update_task_status(request.user, task, department):
+        return JsonResponse(
+            {'ok': False, 'error': 'Bạn không có quyền cập nhật trạng thái nhiệm vụ này.'},
+            status=403,
+        )
+
+    targets = _assignments_to_update_for_user(request.user, task, department)
+    if not targets:
+        return JsonResponse({'ok': False, 'error': 'Không có phân công để cập nhật.'}, status=400)
+
+    # Kéo sang Done: giữ completed nếu đã hoàn thành; còn lại → pending_review
+    updated = 0
+    for asg in targets:
+        if kanban_col == KANBAN_DONE and asg.status == TaskAssignment.STATUS_COMPLETED:
+            continue
+        if asg.status == new_status:
+            continue
+        asg.status = new_status
+        fields = ['status', 'updated_at']
+        if new_status == TaskAssignment.STATUS_PENDING and not asg.submitted_at:
+            asg.submitted_at = timezone.now()
+            fields.append('submitted_at')
+        asg.save(update_fields=fields)
+        updated += 1
+
+    task.refresh_from_db()
+    # Bỏ cache prefetch để tính lại display status
+    task._prefetched_objects_cache = {}
+    display = _task_display_status(
+        _department_tasks_queryset(department).filter(pk=task.pk).first() or task
+    )
+    return JsonResponse({
+        'ok': True,
+        'task_id': task.pk,
+        'status': new_status,
+        'kanban': _kanban_column_for_status(display),
+        'display_status': display,
+        'updated': updated,
+    })
+
+
 @login_required
 @require_http_methods(['GET', 'POST'])
 def department_interaction(request, dept_id):
@@ -488,18 +621,24 @@ def department_interaction(request, dept_id):
     all_tasks = list(tasks_qs)
 
     stats = {
+        'todo': 0,
         'in_progress': 0,
         'pending': 0,
         'overdue': 0,
     }
+    kanban = {
+        KANBAN_TODO: [],
+        KANBAN_IN_PROGRESS: [],
+        KANBAN_DONE: [],
+    }
     task_rows = []
+    can_drag_any = False
     for task in all_tasks:
         st = _task_display_status(task)
-        if st in (
-            TaskAssignment.STATUS_TODO,
-            TaskAssignment.STATUS_IN_PROGRESS,
-            TaskAssignment.STATUS_REDO,
-        ):
+        col = _kanban_column_for_status(st)
+        if col == KANBAN_TODO:
+            stats['todo'] += 1
+        elif col == KANBAN_IN_PROGRESS:
             stats['in_progress'] += 1
         elif st == TaskAssignment.STATUS_PENDING:
             stats['pending'] += 1
@@ -508,12 +647,19 @@ def department_interaction(request, dept_id):
 
         enriched = _enrich_task_row(task, today)
         assignees = _department_task_assignees(task)
-        task_rows.append({
+        can_drag = _user_can_update_task_status(request.user, task, department)
+        if can_drag:
+            can_drag_any = True
+        row = {
             'task': enriched,
             'assignees': assignees,
             'primary_assignee': assignees[0] if assignees else None,
             'action': _department_task_action(task, request.user),
-        })
+            'kanban_column': col,
+            'can_drag': can_drag,
+        }
+        task_rows.append(row)
+        kanban[col].append(row)
 
     member_options = []
     for u in assign_form.fields['assignees'].queryset.prefetch_related('my_departments'):
@@ -533,7 +679,13 @@ def department_interaction(request, dept_id):
             'members_count': members_count,
             'stats': stats,
             'task_rows': task_rows,
+            'kanban': kanban,
+            'kanban_todo': kanban[KANBAN_TODO],
+            'kanban_in_progress': kanban[KANBAN_IN_PROGRESS],
+            'kanban_done': kanban[KANBAN_DONE],
             'can_assign': can_assign,
+            'can_drag_any': can_drag_any,
+            'status_update_url': reverse('update_task_status_api', args=[department.pk]),
             'assign_form': assign_form,
             'show_assign_modal': show_assign_modal,
             'member_options_json': json.dumps(member_options, ensure_ascii=False),

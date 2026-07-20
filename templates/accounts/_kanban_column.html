@@ -1,0 +1,66 @@
+{# Partial: one Kanban column. Expects column_id, column_key, column_title, column_hint, column_rows, header_bg, header_text #}
+<div class="w-[350px] shrink-0 flex flex-col rounded-2xl border border-gray-100 bg-slate-50/80 shadow-sm min-h-[500px]">
+    <div class="px-4 py-3 border-b border-gray-100 {{ header_bg }} rounded-t-2xl">
+        <div class="flex items-center justify-between gap-2">
+            <h2 class="text-sm font-semibold {{ header_text }}">{{ column_title }}</h2>
+            <span class="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1.5 rounded-full bg-white/80 text-xs font-semibold text-gray-600 border border-gray-100">
+                {{ column_rows|length }}
+            </span>
+        </div>
+        <p class="text-[11px] text-gray-500 mt-0.5">{{ column_hint }}</p>
+    </div>
+    <div id="{{ column_id }}"
+         class="kanban-column-list flex-1 p-3 space-y-3 min-h-[420px]"
+         data-status="{{ column_key }}">
+        {% for row in column_rows %}
+        <article class="kanban-card bg-white rounded-xl border border-gray-100 shadow-sm p-3.5
+                        {% if row.can_drag %}cursor-grab active:cursor-grabbing{% else %}cursor-default{% endif %}"
+                 data-task-id="{{ row.task.pk }}"
+                 data-can-drag="{% if row.can_drag %}1{% else %}0{% endif %}">
+            <div class="flex items-start justify-between gap-2">
+                <p class="text-sm font-semibold text-gray-900 leading-snug">{{ row.task.title }}</p>
+                {% if row.action %}
+                <a href="{{ row.action.url }}"
+                   class="shrink-0 text-gray-300 hover:text-primary p-0.5"
+                   title="{{ row.action.label }}"
+                   onclick="event.stopPropagation()">
+                    <i class="fas fa-external-link-alt text-xs"></i>
+                </a>
+                {% endif %}
+            </div>
+
+            <div class="mt-2.5 flex flex-wrap items-center gap-2">
+                {% if row.task.row_is_overdue %}
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 text-red-700 text-[11px] font-semibold border border-red-100">
+                    <i class="fas fa-exclamation-circle"></i>
+                    {{ row.task.deadline|date:"d/m/Y" }}
+                </span>
+                {% else %}
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-50 text-gray-600 text-[11px] font-medium border border-gray-100">
+                    <i class="fas fa-calendar-alt text-gray-400"></i>
+                    {{ row.task.deadline|date:"d/m/Y" }}
+                </span>
+                {% endif %}
+                <span class="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium {{ row.task.display_status_pill }}">
+                    {{ row.task.display_status_label }}
+                </span>
+            </div>
+
+            {% with person=row.primary_assignee %}
+            {% if person %}
+            <div class="mt-3 flex items-center gap-2 min-w-0">
+                <img src="{{ person.avatar_url }}" alt=""
+                     class="w-7 h-7 rounded-full object-cover border border-gray-200 shrink-0">
+                <span class="text-xs text-gray-700 truncate">{{ person }}</span>
+                {% if row.assignees|length > 1 %}
+                <span class="text-[10px] text-gray-400 shrink-0">+{{ row.assignees|length|add:"-1" }}</span>
+                {% endif %}
+            </div>
+            {% else %}
+            <p class="mt-3 text-xs text-gray-400">Chưa có người nhận</p>
+            {% endif %}
+            {% endwith %}
+        </article>
+        {% endfor %}
+    </div>
+</div>
