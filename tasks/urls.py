@@ -13,6 +13,7 @@ urlpatterns = [
     path('staff/', views.staff_dashboard, name='staff_dashboard'),
     path('staff/tasks/', views.staff_my_tasks, name='staff_my_tasks'),
     path('staff/tasks/<int:pk>/', views.staff_task_detail, name='staff_task_detail'),
+    path('staff/tasks/<int:pk>/handover/', views.staff_task_handover, name='staff_task_handover'),
     path('staff/tasks/<int:pk>/members/add/', views.staff_task_add_members, name='staff_task_add_members'),
     path('staff/tasks/<int:pk>/members/remove/', views.staff_task_remove_member, name='staff_task_remove_member'),
     path('staff/tasks/<int:pk>/delegate/', views.staff_task_set_delegate, name='staff_task_set_delegate'),
@@ -26,6 +27,11 @@ urlpatterns = [
     path('manager/tasks/create/', views.manager_create_task, name='manager_create_task'),
     path('manager/tasks/manage/', views.manager_manage_tasks, name='manager_manage_tasks'),
     path('manager/tasks/<int:pk>/', views.manager_task_detail, name='manager_task_detail'),
+    path(
+        'manager/tasks/<int:pk>/assignments/<int:assignment_pk>/handover/',
+        views.manager_task_handover,
+        name='manager_task_handover',
+    ),
     path(
         'manager/tasks/<int:pk>/add-performers/',
         views.manager_task_add_performers,

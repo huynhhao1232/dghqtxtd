@@ -45,7 +45,7 @@ class StaffEditRoleTestCase(TestCase):
                 'email': '',
                 'phone': '',
                 'position': 'GV',
-                'is_active': True,
+                'account_status': User.ACCOUNT_ACTIVE,
             },
             instance=self.staff_user,
             actor=self.director,
@@ -64,7 +64,7 @@ class StaffEditRoleTestCase(TestCase):
                 'email': '',
                 'phone': '',
                 'position': '',
-                'is_active': True,
+                'account_status': User.ACCOUNT_ACTIVE,
             },
             instance=self.dept_user,
             actor=self.director,
@@ -83,7 +83,7 @@ class StaffEditRoleTestCase(TestCase):
                 'email': '',
                 'phone': '',
                 'position': '',
-                'is_active': True,
+                'account_status': User.ACCOUNT_ACTIVE,
             },
             instance=self.director,
             actor=self.director,
@@ -92,8 +92,8 @@ class StaffEditRoleTestCase(TestCase):
         self.assertIn('role', form.errors)
 
     def test_cannot_demote_last_active_director(self):
-        self.director2.is_active = False
-        self.director2.save(update_fields=['is_active'])
+        self.director2.account_status = User.ACCOUNT_INACTIVE
+        self.director2.save()
         form = StaffEditForm(
             data={
                 'role': User.ROLE_DEPARTMENT,
@@ -101,7 +101,7 @@ class StaffEditRoleTestCase(TestCase):
                 'email': '',
                 'phone': '',
                 'position': '',
-                'is_active': True,
+                'account_status': User.ACCOUNT_ACTIVE,
             },
             instance=self.director,
             actor=self.director2,
@@ -122,7 +122,7 @@ class StaffEditRoleTestCase(TestCase):
                 'email': 'gv@example.com',
                 'phone': '',
                 'position': 'GV',
-                'is_active': 'on',
+                'account_status': User.ACCOUNT_ACTIVE,
             },
         )
         self.assertEqual(resp.status_code, 302)
@@ -139,3 +139,4 @@ class StaffEditRoleTestCase(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'name="role"')
         self.assertContains(resp, 'Tổ chuyên môn')
+        self.assertContains(resp, 'name="account_status"')

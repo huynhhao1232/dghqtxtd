@@ -51,7 +51,14 @@ class Department(models.Model):
 
     @property
     def member_count(self):
-        return self.members.filter(is_active=True).count()
+        """Số thành viên còn đăng nhập được (ACTIVE + ON_LEAVE)."""
+        return self.members.filter(is_active=True).exclude(
+            account_status=User.ACCOUNT_INACTIVE,
+        ).count()
+
+    def assignable_members(self):
+        """Thành viên có thể nhận việc mới (ACTIVE, không nghỉ phép / khóa)."""
+        return User.bulk_assignable_queryset(self.members.all())
 
     @property
     def badge_classes(self):
@@ -122,6 +129,15 @@ class User(AbstractUser):
         (ROLE_STAFF, 'Giáo viên / Nhân viên'),
     ]
 
+    ACCOUNT_ACTIVE = 'ACTIVE'
+    ACCOUNT_ON_LEAVE = 'ON_LEAVE'
+    ACCOUNT_INACTIVE = 'INACTIVE'
+    ACCOUNT_STATUS_CHOICES = [
+        (ACCOUNT_ACTIVE, 'Đang hoạt động'),
+        (ACCOUNT_ON_LEAVE, 'Nghỉ phép'),
+        (ACCOUNT_INACTIVE, 'Ngưng hoạt động'),
+    ]
+
     is_manager = models.BooleanField(
         default=False,
         verbose_name='Là lãnh đạo',
@@ -134,6 +150,17 @@ class User(AbstractUser):
         verbose_name='Vai trò',
         help_text='director=Ban Giám đốc, department=Tổ chuyên môn, staff=Giáo viên/NV.',
         db_index=True,
+    )
+    account_status = models.CharField(
+        max_length=20,
+        choices=ACCOUNT_STATUS_CHOICES,
+        default=ACCOUNT_ACTIVE,
+        db_index=True,
+        verbose_name='Trạng thái tài khoản',
+        help_text=(
+            'ACTIVE=nhận việc bình thường; ON_LEAVE=đăng nhập được nhưng không nhận giao mới; '
+            'INACTIVE=khóa đăng nhập (đồng bộ is_active=False).'
+        ),
     )
     position = models.CharField(
         max_length=150,
@@ -166,11 +193,22 @@ class User(AbstractUser):
         if self.is_manager and self.role != self.ROLE_DEPARTMENT:
             self.role = self.ROLE_DIRECTOR
         self.is_manager = self.role == self.ROLE_DIRECTOR
+        # Sync is_active với account_status (INACTIVE khóa login; ON_LEAVE vẫn đăng nhập được).
+        if self.account_status == self.ACCOUNT_INACTIVE:
+            self.is_active = False
+        elif self.account_status in (self.ACCOUNT_ACTIVE, self.ACCOUNT_ON_LEAVE):
+            self.is_active = True
+        elif not self.is_active:
+            self.account_status = self.ACCOUNT_INACTIVE
         super().save(*args, **kwargs)
 
     @property
     def role_label(self):
         return dict(self.ROLE_CHOICES).get(self.role, self.role)
+
+    @property
+    def account_status_label(self):
+        return dict(self.ACCOUNT_STATUS_CHOICES).get(self.account_status, self.account_status)
 
     # Naming: AbstractUser already has boolean is_staff (Django admin access).
     # Use is_director / is_department / is_staff_member for app RBAC — never shadow is_staff.
@@ -187,13 +225,36 @@ class User(AbstractUser):
         """App role Giáo viên/NV (role=='staff'). Not Django's is_staff."""
         return self.role == self.ROLE_STAFF
 
+    @property
+    def is_on_leave(self):
+        return self.account_status == self.ACCOUNT_ON_LEAVE
+
+    @property
+    def is_bulk_assignable(self):
+        """True nếu được đưa vào giao đồng loạt / mở rộng thành viên."""
+        return (
+            self.is_active
+            and self.account_status == self.ACCOUNT_ACTIVE
+            and not self.is_director
+        )
+
     def can_assign_tasks(self):
         return self.role in (self.ROLE_DIRECTOR, self.ROLE_DEPARTMENT)
 
     @classmethod
+    def bulk_assignable_queryset(cls, qs=None):
+        """Lọc user ACTIVE (không nghỉ phép / khóa) — dùng cho bulk assign."""
+        base = qs if qs is not None else cls.objects.all()
+        return (
+            base.filter(is_active=True, account_status=cls.ACCOUNT_ACTIVE)
+            .exclude(role=cls.ROLE_DIRECTOR)
+            .order_by('last_name', 'first_name', 'username')
+        )
+
+    @classmethod
     def assignable_queryset_for(cls, actor):
-        """Người có thể được giao việc theo role của actor."""
-        base = cls.objects.filter(is_active=True).order_by('last_name', 'first_name', 'username')
+        """Người có thể được giao việc theo role của actor (loại ON_LEAVE / INACTIVE)."""
+        base = cls.bulk_assignable_queryset()
         if actor is None or not getattr(actor, 'is_authenticated', False):
             return cls.objects.none()
         if actor.is_director:

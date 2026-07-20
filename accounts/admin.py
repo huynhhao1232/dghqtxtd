@@ -29,11 +29,12 @@ class UserAdmin(DjangoUserAdmin):
         'last_name',
         'position',
         'role',
+        'account_status',
         'is_manager',
         'is_active',
     )
     list_editable = ('role',)
-    list_filter = ('role', 'is_manager', 'is_active')
+    list_filter = ('role', 'account_status', 'is_manager', 'is_active')
     search_fields = ('username', 'first_name', 'last_name', 'email')
     fieldsets = DjangoUserAdmin.fieldsets + (
         (
@@ -41,6 +42,7 @@ class UserAdmin(DjangoUserAdmin):
             {
                 'fields': (
                     'role',
+                    'account_status',
                     'is_manager',
                     'position',
                     'phone',
@@ -55,6 +57,7 @@ class UserAdmin(DjangoUserAdmin):
             {
                 'fields': (
                     'role',
+                    'account_status',
                     'is_manager',
                     'position',
                     'phone',

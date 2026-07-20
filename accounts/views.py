@@ -298,9 +298,13 @@ def manager_staff_list(request):
                 return redirect('manager_staff')
         elif action == 'toggle_active' and staff_id:
             staff = get_object_or_404(User, pk=staff_id)
-            staff.is_active = not staff.is_active
-            staff.save(update_fields=['is_active'])
-            state = 'mở khóa' if staff.is_active else 'khóa'
+            if staff.account_status == User.ACCOUNT_INACTIVE:
+                staff.account_status = User.ACCOUNT_ACTIVE
+                state = 'mở khóa'
+            else:
+                staff.account_status = User.ACCOUNT_INACTIVE
+                state = 'khóa'
+            staff.save()
             messages.success(request, f'Đã {state} tài khoản "{staff}".')
             return redirect('manager_staff')
 

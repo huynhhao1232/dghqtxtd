@@ -164,10 +164,15 @@ class StaffEditForm(forms.ModelForm):
         required=False,
         widget=forms.MultipleHiddenInput,
     )
+    account_status = forms.ChoiceField(
+        choices=User.ACCOUNT_STATUS_CHOICES,
+        label='Trạng thái tài khoản',
+        widget=forms.Select(attrs={'class': EDIT_INPUT_CLASS, 'id': 'id_account_status'}),
+    )
 
     class Meta:
         model = User
-        fields = ('role', 'email', 'phone', 'position', 'is_active')
+        fields = ('role', 'email', 'phone', 'position', 'account_status')
         widgets = {
             'email': forms.EmailInput(
                 attrs={'class': EDIT_INPUT_CLASS, 'placeholder': 'email@example.com'}
@@ -178,12 +183,17 @@ class StaffEditForm(forms.ModelForm):
             'position': forms.TextInput(
                 attrs={'class': EDIT_INPUT_CLASS, 'placeholder': 'VD: Giáo viên'}
             ),
-            'is_active': forms.CheckboxInput(
-                attrs={'class': 'sr-only peer', 'id': 'id_is_active'}
-            ),
         }
 
-    field_order = ('role', 'full_name', 'email', 'phone', 'departments', 'position', 'is_active')
+    field_order = (
+        'role',
+        'full_name',
+        'email',
+        'phone',
+        'departments',
+        'position',
+        'account_status',
+    )
 
     def __init__(self, *args, actor=None, **kwargs):
         self.actor = actor
@@ -195,6 +205,7 @@ class StaffEditForm(forms.ModelForm):
             self.fields['full_name'].initial = user_display_full_name(self.instance)
             self.fields['departments'].initial = self.instance.my_departments.all()
             self.fields['role'].initial = self.instance.role
+            self.fields['account_status'].initial = self.instance.account_status
 
     def clean_role(self):
         role = self.cleaned_data['role']
@@ -210,7 +221,11 @@ class StaffEditForm(forms.ModelForm):
                     'Bạn không thể tự hạ vai trò Ban Giám đốc của chính mình.'
                 )
             other_directors = (
-                User.objects.filter(role=User.ROLE_DIRECTOR, is_active=True)
+                User.objects.filter(
+                    role=User.ROLE_DIRECTOR,
+                    account_status=User.ACCOUNT_ACTIVE,
+                    is_active=True,
+                )
                 .exclude(pk=user.pk)
                 .exists()
             )
@@ -228,6 +243,9 @@ class StaffEditForm(forms.ModelForm):
         role = self.cleaned_data.get('role', user.role)
         user.role = role
         user.is_manager = role == User.ROLE_DIRECTOR
+        user.account_status = self.cleaned_data.get(
+            'account_status', user.account_status
+        )
         if commit:
             user.save()
             user.my_departments.set(self.cleaned_data.get('departments') or [])

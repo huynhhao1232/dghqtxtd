@@ -1834,3 +1834,164 @@ class AddTaskPerformersTestCase(TestCase):
             {'assignees': [self.staff1.pk]},
         )
         self.assertEqual(task.assignments.filter(assignee=self.staff1).count(), 1)
+
+
+class HandoverAndLeaveTestCase(TestCase):
+    """Bàn giao + loại nghỉ phép khỏi giao đồng loạt + chuyển tổ."""
+
+    def setUp(self):
+        self.manager = User.objects.create_user(
+            username='mgr_ho',
+            password='x',
+            role=User.ROLE_DIRECTOR,
+            is_manager=True,
+            first_name='Lãnh',
+            last_name='Đạo',
+        )
+        self.leader = User.objects.create_user(
+            username='leader_ho',
+            password='x',
+            role=User.ROLE_DEPARTMENT,
+            first_name='Trưởng',
+            last_name='Tổ',
+        )
+        self.member1 = User.objects.create_user(
+            username='m1_ho',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='A',
+            last_name='Nguyễn',
+        )
+        self.member2 = User.objects.create_user(
+            username='m2_ho',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='B',
+            last_name='Trần',
+        )
+        self.on_leave = User.objects.create_user(
+            username='leave_ho',
+            password='x',
+            role=User.ROLE_STAFF,
+            first_name='Nghỉ',
+            last_name='Phép',
+            account_status=User.ACCOUNT_ON_LEAVE,
+        )
+        self.dept = Department.objects.create(name='Tổ Handover', leader=self.leader)
+        self.dept.members.add(self.leader, self.member1, self.member2, self.on_leave)
+        self.today = timezone.localdate()
+        self.client = Client()
+
+    def test_bulk_all_members_excludes_on_leave(self):
+        self.client.force_login(self.manager)
+        title = 'Nộp sổ chủ nhiệm leave'
+        response = self.client.post(reverse('manager_create_task'), {
+            'title': title,
+            'description': 'Bulk',
+            'deadline': (self.today + timedelta(days=10)).isoformat(),
+            'cycle': Task.CYCLE_MONTH,
+            'assign_mode': 'batch_department',
+            'batch_departments': [self.dept.pk],
+            'department_execution_mode': 'all_members',
+        })
+        self.assertEqual(response.status_code, 302)
+        # leader + member1 + member2 — không gồm on_leave
+        tasks = list(Task.objects.filter(title__startswith=f'{title} - ['))
+        self.assertEqual(len(tasks), 3)
+        assignee_ids = {
+            TaskAssignment.objects.get(task=t).assignee_id for t in tasks
+        }
+        self.assertIn(self.leader.pk, assignee_ids)
+        self.assertIn(self.member1.pk, assignee_ids)
+        self.assertIn(self.member2.pk, assignee_ids)
+        self.assertNotIn(self.on_leave.pk, assignee_ids)
+
+    def test_hand_over_assignment_creates_active_for_new_user(self):
+        from .handover import hand_over_assignment
+
+        task = Task.objects.create(
+            title='Việc cá nhân',
+            created_by=self.manager,
+            deadline=self.today + timedelta(days=7),
+            cycle=Task.CYCLE_MONTH,
+            source_department=self.dept,
+        )
+        old = TaskAssignment.objects.create(task=task, assignee=self.member1)
+        new = hand_over_assignment(old, self.member2, actor=self.member1)
+        old.refresh_from_db()
+        self.assertEqual(old.handover_status, TaskAssignment.HANDOVER_HANDED_OVER)
+        self.assertEqual(old.handed_over_to_id, self.member2.pk)
+        self.assertEqual(new.assignee_id, self.member2.pk)
+        self.assertEqual(new.handover_status, TaskAssignment.HANDOVER_ACTIVE)
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.member2,
+                related_task=task,
+            ).exists()
+        )
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.member1,
+                related_task=task,
+            ).exists()
+        )
+
+    def test_staff_handover_view(self):
+        task = Task.objects.create(
+            title='Bàn giao UI',
+            created_by=self.manager,
+            deadline=self.today + timedelta(days=7),
+            cycle=Task.CYCLE_MONTH,
+            source_department=self.dept,
+        )
+        asg = TaskAssignment.objects.create(task=task, assignee=self.member1)
+        self.client.force_login(self.member1)
+        resp = self.client.post(
+            reverse('staff_task_handover', args=[asg.pk]),
+            {'to_user_id': self.member2.pk},
+        )
+        self.assertEqual(resp.status_code, 302)
+        asg.refresh_from_db()
+        self.assertEqual(asg.handover_status, TaskAssignment.HANDOVER_HANDED_OVER)
+        self.assertTrue(
+            TaskAssignment.objects.filter(
+                task=task,
+                assignee=self.member2,
+                handover_status=TaskAssignment.HANDOVER_ACTIVE,
+            ).exists()
+        )
+
+    def test_department_transfer_marks_handed_over_and_notifies_leader(self):
+        task = Task.objects.create(
+            title='Việc khi chuyển tổ',
+            created_by=self.manager,
+            deadline=self.today + timedelta(days=7),
+            cycle=Task.CYCLE_MONTH,
+            source_department=self.dept,
+        )
+        asg = TaskAssignment.objects.create(task=task, assignee=self.member1)
+        TaskParticipation.objects.create(
+            task=task,
+            user=self.member1,
+            department=self.dept,
+            role=TaskParticipation.ROLE_LEAD,
+        )
+        self.dept.members.remove(self.member1)
+        asg.refresh_from_db()
+        self.assertEqual(asg.handover_status, TaskAssignment.HANDOVER_HANDED_OVER)
+        part = TaskParticipation.objects.get(task=task, user=self.member1)
+        self.assertEqual(part.handover_status, TaskParticipation.HANDOVER_HANDED_OVER)
+        self.assertTrue(
+            Notification.objects.filter(
+                recipient=self.leader,
+                related_task=task,
+                message__contains='đã chuyển tổ',
+            ).exists()
+        )
+
+    def test_on_leave_can_login_but_not_assignable(self):
+        self.assertTrue(self.on_leave.is_active)
+        self.assertTrue(self.on_leave.is_on_leave)
+        qs = User.assignable_queryset_for(self.manager)
+        self.assertNotIn(self.on_leave, qs)
+        self.assertIn(self.member1, qs)

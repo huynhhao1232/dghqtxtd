@@ -120,6 +120,7 @@ class Task(models.Model):
     assignees = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         through='TaskAssignment',
+        through_fields=('task', 'assignee'),
         related_name='assigned_tasks',
         verbose_name='Người nhận',
     )
@@ -238,7 +239,10 @@ class Task(models.Model):
         if (
             self.is_team_task
             and self.primary_department.leader_id is None
-            and self.assignments.filter(assignee_id=user.id).exists()
+            and self.assignments.filter(
+                assignee_id=user.id,
+                handover_status=TaskAssignment.HANDOVER_ACTIVE,
+            ).exists()
         ):
             canonical = self.get_canonical_assignment()
             return bool(canonical and canonical.assignee_id == user.id)
@@ -331,15 +335,16 @@ class Task(models.Model):
         return self.is_coordinating_leader(user)
 
     def get_canonical_assignment(self):
-        """Assignment của Trưởng tổ Chủ trì — nộp lên Lãnh đạo."""
+        """Assignment ACTIVE của Trưởng tổ Chủ trì — nộp lên Lãnh đạo."""
         if not self.is_team_task:
             return None
+        active = self.assignments.filter(handover_status=TaskAssignment.HANDOVER_ACTIVE)
         leader_id = self.primary_department.leader_id if self.primary_department else None
         if leader_id:
-            found = self.assignments.filter(assignee_id=leader_id).first()
+            found = active.filter(assignee_id=leader_id).first()
             if found:
                 return found
-        return self.assignments.order_by('pk').first()
+        return active.order_by('pk').first()
 
     def sync_team_assignment_status(self, canonical):
         """Đồng bộ trạng thái / kết quả đánh giá cho mọi assignment trên task tổ."""
@@ -355,8 +360,10 @@ class Task(models.Model):
         )
 
     def participations_for_leader(self, user):
-        """TaskParticipation thuộc phạm vi tổ mà trưởng tổ đang quản lý."""
-        qs = self.participations.select_related('user', 'department')
+        """TaskParticipation ACTIVE thuộc phạm vi tổ mà trưởng tổ đang quản lý."""
+        qs = self.participations.filter(
+            handover_status=TaskParticipation.HANDOVER_ACTIVE,
+        ).select_related('user', 'department')
         if self.is_primary_leader(user):
             return qs.filter(role=TaskParticipation.ROLE_LEAD)
         coord_dept = self.get_coordinating_department_for(user)
@@ -369,7 +376,9 @@ class Task(models.Model):
 
     def participations_for_internal_evaluation(self, user):
         """Chỉ Trưởng tổ Chủ trì đánh giá tất cả cá nhân tham gia sau nghiệm thu."""
-        qs = self.participations.select_related('user', 'department')
+        qs = self.participations.filter(
+            handover_status=TaskParticipation.HANDOVER_ACTIVE,
+        ).select_related('user', 'department')
         if self.is_primary_leader(user):
             return qs.all()
         return qs.none()
@@ -396,7 +405,11 @@ class Task(models.Model):
             canonical = self.get_canonical_assignment()
             return canonical.status if canonical else TaskAssignment.STATUS_TODO
 
-        statuses = list(self.assignments.values_list('status', flat=True))
+        statuses = list(
+            self.assignments.filter(
+                handover_status=TaskAssignment.HANDOVER_ACTIVE,
+            ).values_list('status', flat=True)
+        )
         if not statuses:
             return TaskAssignment.STATUS_TODO
         if TaskAssignment.STATUS_PENDING in statuses:
@@ -500,6 +513,13 @@ class TaskParticipation(models.Model):
         *EvaluationResult.CHOICES,
     ]
 
+    HANDOVER_ACTIVE = 'ACTIVE'
+    HANDOVER_HANDED_OVER = 'HANDED_OVER'
+    HANDOVER_STATUS_CHOICES = [
+        (HANDOVER_ACTIVE, 'Đang phụ trách'),
+        (HANDOVER_HANDED_OVER, 'Đã bàn giao'),
+    ]
+
     task = models.ForeignKey(
         Task,
         on_delete=models.CASCADE,
@@ -539,6 +559,21 @@ class TaskParticipation(models.Model):
     )
     added_at = models.DateTimeField(auto_now_add=True)
     evaluated_at = models.DateTimeField(null=True, blank=True)
+    handover_status = models.CharField(
+        max_length=20,
+        choices=HANDOVER_STATUS_CHOICES,
+        default=HANDOVER_ACTIVE,
+        db_index=True,
+        verbose_name='Trạng thái bàn giao',
+    )
+    handed_over_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='received_participations',
+        verbose_name='Bàn giao cho',
+    )
 
     class Meta:
         verbose_name = 'Thành viên tham gia'
@@ -633,6 +668,13 @@ class TaskAssignment(models.Model):
         (STATUS_REDO, 'Yêu cầu làm lại'),
     ]
 
+    HANDOVER_ACTIVE = 'ACTIVE'
+    HANDOVER_HANDED_OVER = 'HANDED_OVER'
+    HANDOVER_STATUS_CHOICES = [
+        (HANDOVER_ACTIVE, 'Đang phụ trách'),
+        (HANDOVER_HANDED_OVER, 'Đã bàn giao'),
+    ]
+
     EVAL_DAT = EvaluationResult.DAT
     EVAL_CHO_LAM_LAI = EvaluationResult.CHO_LAM_LAI
     EVAL_TRE_BI_TRU_DIEM = EvaluationResult.TRE_BI_TRU_DIEM
@@ -668,6 +710,22 @@ class TaskAssignment(models.Model):
         choices=STATUS_CHOICES,
         default=STATUS_TODO,
         verbose_name='Trạng thái',
+    )
+    handover_status = models.CharField(
+        max_length=20,
+        choices=HANDOVER_STATUS_CHOICES,
+        default=HANDOVER_ACTIVE,
+        db_index=True,
+        verbose_name='Trạng thái bàn giao',
+        help_text='ACTIVE=đang phụ trách; HANDED_OVER=đã bàn giao (không còn nhận việc này).',
+    )
+    handed_over_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='received_assignments',
+        verbose_name='Bàn giao cho',
     )
     notes = models.TextField(blank=True, verbose_name='Ghi chú')
     proof_file = models.FileField(

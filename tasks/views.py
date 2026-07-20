@@ -32,6 +32,11 @@ from .forms import (
     TaskCreateForm,
     TaskEditForm,
 )
+from .handover import (
+    can_handover_assignment,
+    hand_over_assignment,
+    handover_candidates_for_assignment,
+)
 from .models import (
     CoordinatingProof,
     EvaluationResult,
@@ -84,8 +89,11 @@ def _staff_assignments_qs(user):
     Cô lập danh sách việc theo role:
     - department: việc họ tạo HOẶC được giao
     - staff: chỉ việc được giao (assignee / trưởng tổ nhận theo tổ)
+    Chỉ hiện bản phân công đang ACTIVE (chưa bàn giao).
     """
-    qs = _assignment_detail_qs()
+    qs = _assignment_detail_qs().filter(
+        handover_status=TaskAssignment.HANDOVER_ACTIVE,
+    )
     if getattr(user, 'is_department', False):
         qs = qs.filter(Q(task__created_by=user) | _staff_assignment_q(user))
     else:
@@ -457,11 +465,17 @@ def staff_task_detail(request, pk):
     )
 
     lead_participations = list(
-        task.participations.filter(role=TaskParticipation.ROLE_LEAD)
+        task.participations.filter(
+            role=TaskParticipation.ROLE_LEAD,
+            handover_status=TaskParticipation.HANDOVER_ACTIVE,
+        )
         .select_related('user', 'department')
     ) if task.is_team_task else []
     coord_participations = list(
-        task.participations.filter(role=TaskParticipation.ROLE_COORD)
+        task.participations.filter(
+            role=TaskParticipation.ROLE_COORD,
+            handover_status=TaskParticipation.HANDOVER_ACTIVE,
+        )
         .select_related('user', 'department')
     ) if task.is_team_task else []
 
@@ -634,6 +648,13 @@ def staff_task_detail(request, pk):
         if canonical:
             display_assignment = canonical
 
+    can_handover = can_handover_assignment(request.user, assignment)
+    handover_candidates = list(handover_candidates_for_assignment(assignment)) if can_handover else []
+    handover_assignee_on_leave = bool(
+        assignment.assignee_id
+        and getattr(assignment.assignee, 'is_on_leave', False)
+    )
+
     # Thành viên có thể thêm: theo tổ của trưởng tổ / người tạo đang xem
     manage_dept = _managed_department(assignment, request.user)
     can_manage_members = task.can_manage_task_members(request.user) or bool(
@@ -645,21 +666,21 @@ def staff_task_detail(request, pk):
     )
     available_members = []
     if manage_dept and can_manage_members and not members_locked:
-        existing_ids = set(task.participations.values_list('user_id', flat=True))
+        existing_ids = set(
+            task.participations.filter(
+                handover_status=TaskParticipation.HANDOVER_ACTIVE,
+            ).values_list('user_id', flat=True)
+        )
         existing_ids.add(request.user.id)
         existing_ids.update(
-            task.assignments.exclude(assignee_id=None).values_list(
-                'assignee_id', flat=True
-            )
+            task.assignments.filter(
+                assignee_id__isnull=False,
+                handover_status=TaskAssignment.HANDOVER_ACTIVE,
+            ).values_list('assignee_id', flat=True)
         )
         available_members = list(
-            User.objects.filter(
-                my_departments=manage_dept,
-                is_active=True,
-            )
-            .exclude(role=User.ROLE_DIRECTOR)
+            manage_dept.assignable_members()
             .exclude(pk__in=existing_ids)
-            .order_by('last_name', 'first_name')
         )
 
     open_evaluate = request.GET.get('evaluate') == '1' or (
@@ -719,8 +740,49 @@ def staff_task_detail(request, pk):
             'has_subtask_assignees': bool(subtask_assignee_options),
             'subtask_review_form': SubtaskReviewForm(),
             'open_subtask_modal': request.GET.get('subtask') == '1',
+            'can_handover': can_handover,
+            'handover_candidates': handover_candidates,
+            'handover_assignee_on_leave': handover_assignee_on_leave,
         },
     )
+
+
+@login_required
+@require_POST
+def staff_task_handover(request, pk):
+    """Bàn giao bản phân công cho thành viên khác trong cùng tổ."""
+    if request.user.is_director or request.user.is_manager:
+        return redirect('manager_dashboard')
+
+    assignment = _get_staff_assignment(request, pk)
+    if not can_handover_assignment(request.user, assignment):
+        return HttpResponseForbidden('Bạn không có quyền bàn giao công việc này.')
+
+    to_user_id = request.POST.get('to_user_id')
+    if not to_user_id:
+        messages.error(request, 'Vui lòng chọn người nhận bàn giao.')
+        return redirect('staff_task_detail', pk=pk)
+
+    candidates = handover_candidates_for_assignment(assignment)
+    to_user = candidates.filter(pk=to_user_id).first()
+    if not to_user:
+        messages.error(request, 'Người nhận bàn giao không hợp lệ.')
+        return redirect('staff_task_detail', pk=pk)
+
+    try:
+        new_asg = hand_over_assignment(assignment, to_user, actor=request.user)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect('staff_task_detail', pk=pk)
+
+    messages.success(
+        request,
+        f'Đã bàn giao công việc cho {to_user}.',
+    )
+    # Nếu người bàn giao vẫn xem được bản mới (trưởng tổ) → chuyển sang bản mới
+    if can_handover_assignment(request.user, new_asg) or new_asg.assignee_id == request.user.id:
+        return redirect('staff_task_detail', pk=new_asg.pk)
+    return redirect('staff_my_tasks')
 
 
 @login_required
@@ -938,10 +1000,17 @@ def staff_task_add_members(request, pk):
         )
         return redirect('staff_task_detail', pk=pk)
 
-    exclude_ids = list(task.participations.values_list('user_id', flat=True))
+    exclude_ids = list(
+        task.participations.filter(
+            handover_status=TaskParticipation.HANDOVER_ACTIVE,
+        ).values_list('user_id', flat=True)
+    )
     exclude_ids.append(request.user.id)
     exclude_ids.extend(
-        task.assignments.exclude(assignee_id=None).values_list('assignee_id', flat=True)
+        task.assignments.filter(
+            assignee_id__isnull=False,
+            handover_status=TaskAssignment.HANDOVER_ACTIVE,
+        ).values_list('assignee_id', flat=True)
     )
     form = AddMembersForm(
         request.POST,
@@ -960,12 +1029,18 @@ def staff_task_add_members(request, pk):
             defaults={
                 'department': manage_dept,
                 'role': role,
+                'handover_status': TaskParticipation.HANDOVER_ACTIVE,
             },
         )
         if created:
             added += 1
         else:
             updates = []
+            if part.handover_status != TaskParticipation.HANDOVER_ACTIVE:
+                part.handover_status = TaskParticipation.HANDOVER_ACTIVE
+                part.handed_over_to = None
+                updates.extend(['handover_status', 'handed_over_to'])
+                added += 1
             if not part.department_id:
                 part.department = manage_dept
                 updates.append('department')
@@ -975,9 +1050,25 @@ def staff_task_add_members(request, pk):
             if updates:
                 part.save(update_fields=updates)
         if not batch_dept:
-            _, asg_created = TaskAssignment.objects.get_or_create(
-                task=task, assignee=user
-            )
+            asg = TaskAssignment.objects.filter(task=task, assignee=user).first()
+            if asg is None:
+                TaskAssignment.objects.create(task=task, assignee=user)
+                asg_created = True
+            elif asg.handover_status != TaskAssignment.HANDOVER_ACTIVE:
+                asg.handover_status = TaskAssignment.HANDOVER_ACTIVE
+                asg.handed_over_to = None
+                asg.status = TaskAssignment.STATUS_TODO
+                asg.save(
+                    update_fields=[
+                        'handover_status',
+                        'handed_over_to',
+                        'status',
+                        'updated_at',
+                    ]
+                )
+                asg_created = True
+            else:
+                asg_created = False
             if created and not asg_created:
                 Notification.objects.create(
                     recipient=user,
@@ -1392,13 +1483,28 @@ STATUS_PROGRESS = {
 }
 
 
+def _active_assignments(task):
+    """Chỉ bản phân công đang ACTIVE (chưa bàn giao)."""
+    return [
+        a for a in task.assignments.all()
+        if a.handover_status == TaskAssignment.HANDOVER_ACTIVE
+    ]
+
+
+def _active_participations(task):
+    return [
+        p for p in task.participations.all()
+        if p.handover_status == TaskParticipation.HANDOVER_ACTIVE
+    ]
+
+
 def _task_display_status(task):
     """Trạng thái tổng quát của một Task (ưu tiên assignment canonical / ưu tiên chờ duyệt)."""
     if task.is_team_task:
         canonical = task.get_canonical_assignment()
         return canonical.status if canonical else TaskAssignment.STATUS_TODO
 
-    statuses = [a.status for a in task.assignments.all()]
+    statuses = [a.status for a in _active_assignments(task)]
     if not statuses:
         return TaskAssignment.STATUS_TODO
     if TaskAssignment.STATUS_PENDING in statuses:
@@ -1413,7 +1519,7 @@ def _task_display_status(task):
 
 
 def _task_has_department_assignments(task):
-    return any(a.assignee_department_id for a in task.assignments.all())
+    return any(a.assignee_department_id for a in _active_assignments(task))
 
 
 def _task_progress(task, display_status):
@@ -1428,14 +1534,14 @@ def _task_progress(task, display_status):
         pct = STATUS_PROGRESS.get(display_status, 0)
         return pct, f'Toàn nhiệm vụ · {STATUS_LABELS.get(display_status, "")}'
 
-    parts = list(task.participations.all())
+    parts = _active_participations(task)
     if parts:
         passed = sum(1 for p in parts if p.evaluation == TaskParticipation.EVAL_DAT)
         total = len(parts)
         pct = int(round((passed / total) * 100)) if total else 0
         return pct, f'{passed}/{total} thành viên đạt'
 
-    assignments = list(task.assignments.all())
+    assignments = _active_assignments(task)
     if _task_has_department_assignments(task) or (
         len(assignments) > 1 and not task.is_team_task
     ):
@@ -1472,7 +1578,7 @@ def _enrich_task_row(task, today):
     task.row_is_overdue = is_overdue
     task.target_departments = [
         a.assignee_department
-        for a in task.assignments.all()
+        for a in _active_assignments(task)
         if a.assignee_department_id
     ]
     return task
@@ -1617,7 +1723,13 @@ def _build_batch_tree_node(member_tasks, today):
     by_dept = {}
     orphan_people = []
     for task in enriched:
-        assignment = next(iter(task.assignments.all()), None)
+        assignment = next(
+            (
+                a for a in task.assignments.all()
+                if a.handover_status == TaskAssignment.HANDOVER_ACTIVE
+            ),
+            None,
+        )
         if not assignment:
             continue
         person = _person_leaf_from_assignment(assignment, task, today)
@@ -2080,11 +2192,7 @@ def _add_departments_as_performers(task, departments, exec_mode):
             )
         ))
         for dept in departments:
-            members = list(
-                dept.members.filter(is_active=True)
-                .exclude(role=User.ROLE_DIRECTOR)
-                .order_by('last_name', 'first_name', 'username')
-            )
+            members = list(dept.assignable_members())
             for member in members:
                 if member.pk in seen:
                     continue
@@ -2563,7 +2671,7 @@ def manager_task_detail(request, pk):
                 kind='multi',
             )
 
-    all_assignments = list(task.assignments.all())
+    all_assignments = _active_assignments(task)
     canonical = task.get_canonical_assignment() if task.is_team_task else None
     # Hierarchy cards: nghiệm thu từng người. Team task vẫn giữ bảng canonical.
     if hierarchy and not task.is_team_task:
@@ -2608,6 +2716,30 @@ def manager_task_detail(request, pk):
             for d in add_form.fields['departments'].queryset
         ]
 
+    # Handover: BGĐ có thể bàn giao từng assignment cá nhân ACTIVE
+    for asg in all_assignments:
+        asg.can_handover_ui = False
+        asg.handover_candidates_json = '[]'
+        asg.handover_on_leave = False
+        if not asg.assignee_id:
+            continue
+        if not can_handover_assignment(request.user, asg):
+            continue
+        candidates = list(handover_candidates_for_assignment(asg))
+        asg.can_handover_ui = True
+        asg.handover_on_leave = bool(getattr(asg.assignee, 'is_on_leave', False))
+        asg.handover_candidates_json = json.dumps(
+            [
+                {
+                    'id': u.pk,
+                    'name': str(u),
+                    'avatar': u.avatar_url,
+                }
+                for u in candidates
+            ],
+            ensure_ascii=False,
+        )
+
     return render(
         request,
         'manager/task_detail.html',
@@ -2616,7 +2748,7 @@ def manager_task_detail(request, pk):
             'display_title': display_title,
             'hierarchy': hierarchy,
             'assignments': assignments,
-            'participations': list(task.participations.all()),
+            'participations': _active_participations(task),
             'submitted_count': submitted,
             'total_count': total,
             'progress_pct': progress_pct,
@@ -2629,6 +2761,36 @@ def manager_task_detail(request, pk):
             'dept_options_json': json.dumps(dept_options, ensure_ascii=False),
         },
     )
+
+
+@manager_required
+@require_POST
+def manager_task_handover(request, pk, assignment_pk):
+    """Ban Giám đốc / lãnh đạo bàn giao assignment trên trang chi tiết."""
+    task = _get_managed_task_or_403(request.user, pk)
+    assignment = get_object_or_404(
+        TaskAssignment.objects.select_related('assignee', 'task', 'assignee_department'),
+        pk=assignment_pk,
+        task=task,
+    )
+    if not can_handover_assignment(request.user, assignment):
+        raise PermissionDenied('Bạn không có quyền bàn giao công việc này.')
+
+    to_user_id = request.POST.get('to_user_id')
+    candidates = handover_candidates_for_assignment(assignment)
+    to_user = candidates.filter(pk=to_user_id).first() if to_user_id else None
+    if not to_user:
+        messages.error(request, 'Người nhận bàn giao không hợp lệ.')
+        return redirect('manager_task_detail', pk=task.pk)
+
+    try:
+        hand_over_assignment(assignment, to_user, actor=request.user)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect('manager_task_detail', pk=task.pk)
+
+    messages.success(request, f'Đã bàn giao công việc cho {to_user}.')
+    return redirect('manager_task_detail', pk=task.pk)
 
 
 @assigner_required

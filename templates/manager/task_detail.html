@@ -259,6 +259,18 @@
                             {% endif %}
                         </td>
                         <td class="px-5 py-4 text-right">
+                            <div class="inline-flex flex-wrap items-center justify-end gap-1.5">
+                            {% if a.can_handover_ui %}
+                            <button type="button"
+                                    class="btn-handover inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-teal-800 bg-teal-50 ring-1 ring-teal-600/20 hover:bg-teal-100"
+                                    data-action="{% url 'manager_task_handover' task.pk a.pk %}"
+                                    data-on-leave="{% if a.handover_on_leave %}1{% else %}0{% endif %}"
+                                    data-target-name="{{ a.target_display_name|escape }}"
+                                    data-candidates="{{ a.handover_candidates_json|escape }}"
+                                    title="Bàn giao người khác">
+                                <i class="fas fa-exchange-alt"></i>
+                            </button>
+                            {% endif %}
                             {% if a.status == 'pending_review' and request.user.is_director %}
                             <button type="button"
                                     class="btn-grade inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-white hover:bg-blue-800"
@@ -268,9 +280,8 @@
                                 <i class="fas fa-pen-to-square"></i> Nghiệm thu
                                 {% if task.is_team_task %} toàn Task{% endif %}
                             </button>
-                            {% else %}
-                            <span class="text-xs text-gray-300">—</span>
                             {% endif %}
+                            </div>
                         </td>
                     </tr>
                     {% empty %}
@@ -472,11 +483,91 @@
         </div>
     </div>
 </div>
+
+<div id="handover-modal" class="hidden fixed inset-0 z-50">
+    <div class="absolute inset-0 bg-black/40" data-close-handover></div>
+    <div class="relative min-h-full flex items-center justify-center p-4">
+        <div class="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
+            <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                    <h3 class="text-base font-semibold text-gray-900">
+                        <i class="fas fa-exchange-alt text-teal-600 mr-1.5"></i>Bàn giao người khác
+                    </h3>
+                    <p id="handover-target-label" class="text-xs text-gray-500 mt-0.5"></p>
+                </div>
+                <button type="button" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100" data-close-handover>
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <form id="handover-form" method="post" action="#" class="p-5 space-y-4">
+                {% csrf_token %}
+                <p id="handover-leave-note" class="hidden text-xs font-medium text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-1.5">
+                    <i class="fas fa-user-clock mr-1"></i>Người đang phụ trách đang nghỉ phép.
+                </p>
+                <div>
+                    <label for="handover-to-user" class="block text-sm font-medium text-gray-700 mb-1.5">Người nhận bàn giao</label>
+                    <select id="handover-to-user" name="to_user_id" required
+                            class="w-full px-3 py-2.5 border border-gray-300 rounded-xl bg-white text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none">
+                        <option value="">— Chọn thành viên —</option>
+                    </select>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" data-close-handover
+                            class="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200">
+                        Hủy
+                    </button>
+                    <button type="submit"
+                            class="px-4 py-2 rounded-lg text-sm font-semibold bg-teal-600 text-white hover:bg-teal-700">
+                        Xác nhận bàn giao
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 (function () {
+    // Handover modal
+    var handModal = document.getElementById('handover-modal');
+    var handForm = document.getElementById('handover-form');
+    var handSelect = document.getElementById('handover-to-user');
+    var handLabel = document.getElementById('handover-target-label');
+    var handLeave = document.getElementById('handover-leave-note');
+    function showHand(v) {
+        if (!handModal) return;
+        handModal.classList.toggle('hidden', !v);
+    }
+    document.querySelectorAll('.btn-handover').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var action = btn.getAttribute('data-action');
+            var candidates = [];
+            try {
+                candidates = JSON.parse(btn.getAttribute('data-candidates') || '[]');
+            } catch (e) { candidates = []; }
+            if (handForm) handForm.action = action || '#';
+            if (handLabel) handLabel.textContent = 'Từ: ' + (btn.getAttribute('data-target-name') || '');
+            if (handLeave) {
+                handLeave.classList.toggle('hidden', btn.getAttribute('data-on-leave') !== '1');
+            }
+            if (handSelect) {
+                handSelect.innerHTML = '<option value="">— Chọn thành viên —</option>';
+                candidates.forEach(function (u) {
+                    var opt = document.createElement('option');
+                    opt.value = u.id;
+                    opt.textContent = u.name;
+                    handSelect.appendChild(opt);
+                });
+            }
+            showHand(true);
+        });
+    });
+    document.querySelectorAll('[data-close-handover]').forEach(function (el) {
+        el.addEventListener('click', function () { showHand(false); });
+    });
+
     var accordion = document.getElementById('dept-progress-accordion');
     if (accordion) {
         function setOpen(item, open) {
