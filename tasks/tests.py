@@ -1246,8 +1246,51 @@ class StaffTaskDetailOversightTestCase(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, self.task.title)
-        # Team task: Trưởng tổ Chủ trì vẫn được cập nhật (canonical)
+        # Xem việc thành viên → chỉ xem (không cập nhật thay người khác)
+        self.assertFalse(resp.context['can_update'])
+        self.assertTrue(resp.context['is_overseer'])
+        self.assertContains(resp, 'Tiến độ (chỉ xem)')
+
+    def test_leader_who_is_also_assignee_can_update_progress(self):
+        """
+        Trưởng tổ (kể cả sau khi phân công lại) là assignee của chính mình
+        → form cập nhật tiến độ, không phải «chỉ xem».
+        """
+        leader_asg = TaskAssignment.objects.create(
+            task=self.task,
+            assignee=self.leader,
+        )
+        self.client.force_login(self.leader)
+        resp = self.client.get(
+            reverse('staff_task_detail', kwargs={'pk': leader_asg.pk})
+        )
+        self.assertEqual(resp.status_code, 200)
         self.assertTrue(resp.context['can_update'])
+        self.assertFalse(resp.context['is_overseer'])
+        self.assertContains(resp, 'Cập nhật')
+        self.assertNotContains(resp, 'Tiến độ (chỉ xem)')
+
+        post = self.client.post(
+            reverse('staff_task_detail', kwargs={'pk': leader_asg.pk}),
+            {
+                'action': 'update_progress',
+                'status': TaskAssignment.STATUS_IN_PROGRESS,
+                'notes': 'Trưởng tổ tự cập nhật',
+            },
+        )
+        self.assertEqual(post.status_code, 302)
+        leader_asg.refresh_from_db()
+        self.assertEqual(leader_asg.status, TaskAssignment.STATUS_IN_PROGRESS)
+
+    def test_team_member_assignee_can_update_own_assignment(self):
+        """Assignee trên task tổ (không phải trưởng tổ) vẫn sửa được bản của mình."""
+        self.client.force_login(self.member)
+        resp = self.client.get(
+            reverse('staff_task_detail', kwargs={'pk': self.member_asg.pk})
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.context['can_update'])
+        self.assertNotContains(resp, 'Tiến độ (chỉ xem)')
 
     def test_leader_can_open_via_task_pk(self):
         self.client.force_login(self.leader)

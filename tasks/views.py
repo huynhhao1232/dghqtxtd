@@ -411,18 +411,20 @@ def staff_task_detail(request, pk):
     is_delegated = task.delegated_updater_id == request.user.id
     is_direct_assignee = _is_direct_staff_assignee(assignment, request.user)
 
-    # Assignee / delegated / Trưởng tổ Chủ trì|batch được cập nhật.
-    # Overseer chỉ vì thành viên thuộc tổ mình (sau chuyển giao) → chỉ xem.
+    # Cập nhật tiến độ trên ĐÚNG bản phân công đang mở:
+    # - assignee (cá nhân / trưởng tổ nhận theo tổ) luôn được sửa, kể cả khi
+    #   đồng thời là trưởng tổ / created_by / role Tổ;
+    # - delegated_updater được sửa (ghi vào canonical trên task tổ).
+    # Overseer (trưởng tổ / creator xem việc người khác) → chỉ xem.
     can_update = (
         assignment.status != TaskAssignment.STATUS_COMPLETED
-        and task.can_update_progress(request.user)
         and (
             is_direct_assignee
             or is_delegated
-            or is_primary_leader
             or is_batch_department_leader
         )
     )
+    is_overseer = not can_update
     can_submit_coord_proof = (
         task.is_team_task
         and is_coord_leader
@@ -430,7 +432,9 @@ def staff_task_detail(request, pk):
     )
 
     work_assignment = assignment
-    if task.is_team_task and can_update:
+    # Ủy quyền: ghi vào assignment canonical của Trưởng tổ Chủ trì.
+    # Assignee thì luôn ghi đúng bản mình đang mở (không nhảy sang người khác).
+    if task.is_team_task and can_update and is_delegated and not is_direct_assignee:
         canonical = task.get_canonical_assignment()
         if canonical:
             work_assignment = canonical
@@ -556,7 +560,11 @@ def staff_task_detail(request, pk):
                     obj.submitted_at = timezone.now()
                 obj.save()
                 if task.is_team_task:
-                    task.sync_team_assignment_status(obj)
+                    canonical = task.get_canonical_assignment()
+                    # Chỉ đồng bộ khi chốt bản canonical (trưởng tổ / ủy quyền),
+                    # không lan trạng thái từ assignment thành viên sang cả tổ.
+                    if canonical and obj.pk == canonical.pk:
+                        task.sync_team_assignment_status(obj)
                 messages.success(request, 'Đã cập nhật công việc.')
                 return redirect('staff_task_detail', pk=pk)
 
@@ -664,6 +672,7 @@ def staff_task_detail(request, pk):
             'coord_proofs': coord_proofs,
             'proof_max_mb': TaskAssignment.PROOF_MAX_SIZE_MB,
             'can_update': can_update,
+            'is_overseer': is_overseer,
             'can_submit_coord_proof': can_submit_coord_proof,
             'is_primary_leader': is_primary_leader,
             'is_coord_leader': is_coord_leader,

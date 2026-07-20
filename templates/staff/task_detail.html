@@ -476,7 +476,7 @@
             </div>
         </form>
     </div>
-    {% elif not can_submit_coord_proof and assignment.status != 'completed' %}
+    {% elif is_overseer and not can_submit_coord_proof and assignment.status != 'completed' %}
     <div class="bg-white shadow-sm rounded-xl border border-gray-100 p-6 space-y-3">
         <h2 class="text-base font-semibold text-gray-800"><i class="fas fa-eye text-primary mr-2"></i>Tiến độ (chỉ xem)</h2>
         <p class="text-sm text-gray-700">{{ assignment.get_status_display }}</p>
