@@ -471,7 +471,7 @@ class UnifiedAssignmentDashboardTestCase(TestCase):
         self.assertEqual(len(nodes), 1)
         self.assertEqual(nodes[0]['task'].pk, task.pk)
         self.assertFalse(nodes[0]['is_flat'])
-        self.assertContains(resp, 'Đã nộp 1/2')
+        self.assertContains(resp, '50%')
         self.assertContains(resp, self.dept1.name)
         self.assertContains(resp, self.dept2.name)
 

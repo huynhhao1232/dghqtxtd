@@ -4,338 +4,303 @@
 
 {% block content %}
 <div class="space-y-6">
-    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-        <div>
-            <h1 class="text-2xl font-bold text-gray-900">Công việc đã giao</h1>
-            <p class="text-sm text-gray-500 mt-1">Danh sách việc bạn đã phân công — bấm Chi tiết để xem Tổ/Nhóm và cá nhân</p>
+    <div>
+        <h1 class="text-2xl font-bold text-gray-900">Công việc đã giao</h1>
+        <p class="text-sm text-gray-500 mt-1">Danh sách việc bạn đã phân công — bấm Chi tiết để xem Tổ/Nhóm và cá nhân</p>
+    </div>
+
+    {# ── Summary cards ── #}
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="bg-white border border-gray-200 border-l-4 border-l-gray-400 rounded-lg px-4 py-3">
+            <p class="text-xs font-medium text-gray-500">Tổng</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1 tabular-nums">{{ stats.total }}</p>
+        </div>
+        <div class="bg-white border border-gray-200 border-l-4 border-l-blue-500 rounded-lg px-4 py-3">
+            <p class="text-xs font-medium text-gray-500">Đang làm</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1 tabular-nums">{{ stats.in_progress }}</p>
+        </div>
+        <div class="bg-white border border-gray-200 border-l-4 border-l-amber-400 rounded-lg px-4 py-3">
+            <p class="text-xs font-medium text-gray-500">Chờ duyệt</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1 tabular-nums">{{ stats.pending }}</p>
+        </div>
+        <div class="bg-white border border-gray-200 border-l-4 border-l-red-500 rounded-lg px-4 py-3">
+            <p class="text-xs font-medium text-gray-500">Quá hạn</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1 tabular-nums">{{ stats.overdue }}</p>
+        </div>
+    </div>
+
+    {# ── Filters toolbar ── #}
+    <form method="get" class="bg-white border border-gray-200 rounded-lg p-3 flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+            <div class="relative flex-1 min-w-[10rem] max-w-xs">
+                <i class="fas fa-search absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                <input type="text" name="q" value="{{ q }}" placeholder="Tìm công việc..."
+                       class="w-full pl-8 pr-3 h-9 text-sm border border-gray-200 rounded-md bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+            </div>
+            <select name="status" onchange="this.form.submit()"
+                    class="h-9 text-sm border border-gray-200 rounded-md px-2.5 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none min-w-[8.5rem]">
+                <option value="">Tất cả trạng thái</option>
+                {% for value, label in status_choices %}
+                <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+                <option value="overdue" {% if status_filter == 'overdue' %}selected{% endif %}>Quá hạn</option>
+            </select>
+            <select name="dept" onchange="this.form.submit()"
+                    class="h-9 text-sm border border-gray-200 rounded-md px-2.5 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none min-w-[8.5rem]">
+                <option value="">Tất cả tổ</option>
+                {% for d in departments %}
+                <option value="{{ d.pk }}" {% if dept_filter == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>
+                {% endfor %}
+            </select>
+            {% if q or status_filter or dept_filter %}
+            <a href="{% url 'manager_manage_tasks' %}"
+               class="h-9 inline-flex items-center px-2.5 text-sm text-gray-500 hover:text-gray-800">
+                Xóa lọc
+            </a>
+            {% endif %}
         </div>
         {% if request.user.is_director or request.user.is_department %}
         <a href="{% url 'manager_create_task' %}"
-           class="inline-flex items-center justify-center px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 shadow-sm transition">
-            <i class="fas fa-plus mr-2"></i> Giao việc mới
+           class="inline-flex items-center justify-center h-9 px-4 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 shadow-sm transition shrink-0">
+            <i class="fas fa-plus mr-1.5 text-xs"></i> Giao việc mới
         </a>
         {% endif %}
-    </div>
-
-    {# ── Top stats ── #}
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-            <div class="flex items-center justify-between">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Tổng đã giao</p>
-                <span class="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
-                    <i class="fas fa-folder-open"></i>
-                </span>
-            </div>
-            <p class="text-3xl font-bold text-gray-900 mt-2">{{ stats.total }}</p>
-        </div>
-        <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-            <div class="flex items-center justify-between">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Đang tiến hành</p>
-                <span class="w-9 h-9 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
-                    <i class="fas fa-spinner"></i>
-                </span>
-            </div>
-            <p class="text-3xl font-bold text-sky-700 mt-2">{{ stats.in_progress }}</p>
-        </div>
-        <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-            <div class="flex items-center justify-between">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Chờ nghiệm thu</p>
-                <span class="w-9 h-9 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
-                    <i class="fas fa-hourglass-half"></i>
-                </span>
-            </div>
-            <p class="text-3xl font-bold text-amber-600 mt-2">{{ stats.pending }}</p>
-        </div>
-        <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-            <div class="flex items-center justify-between">
-                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Quá hạn</p>
-                <span class="w-9 h-9 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
-                    <i class="fas fa-exclamation-triangle"></i>
-                </span>
-            </div>
-            <p class="text-3xl font-bold text-red-600 mt-2">{{ stats.overdue }}</p>
-        </div>
-    </div>
-
-    {# ── Filters ── #}
-    <form method="get" class="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-        <div class="flex flex-col lg:flex-row gap-3 lg:items-end">
-            <div class="flex-1">
-                <label class="block text-xs font-medium text-gray-500 mb-1.5">Tìm kiếm</label>
-                <div class="relative">
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
-                    <input type="text" name="q" value="{{ q }}" placeholder="Tên công việc..."
-                           class="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
-                </div>
-            </div>
-            <div class="w-full lg:w-52">
-                <label class="block text-xs font-medium text-gray-500 mb-1.5">Trạng thái</label>
-                <select name="status"
-                        class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
-                    <option value="">Tất cả trạng thái</option>
-                    {% for value, label in status_choices %}
-                    <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                    <option value="overdue" {% if status_filter == 'overdue' %}selected{% endif %}>Quá hạn</option>
-                </select>
-            </div>
-            <div class="w-full lg:w-56">
-                <label class="block text-xs font-medium text-gray-500 mb-1.5">Đơn vị Chủ trì</label>
-                <select name="dept"
-                        class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
-                    <option value="">Tất cả tổ</option>
-                    {% for d in departments %}
-                    <option value="{{ d.pk }}" {% if dept_filter == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="flex gap-2">
-                <button type="submit"
-                        class="px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition">
-                    <i class="fas fa-filter mr-1.5"></i> Lọc
-                </button>
-                <a href="{% url 'manager_manage_tasks' %}"
-                   class="px-4 py-2.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition">
-                    Xóa lọc
-                </a>
-            </div>
-        </div>
     </form>
 
-    {# ── Flat list (một hàng / công việc gốc) ── #}
-    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+    {# ── Flat list ── #}
+    <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div class="overflow-x-auto">
             <table class="min-w-full text-sm">
                 <thead class="bg-gray-50 border-b border-gray-200">
                     <tr>
-                        <th class="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tên công việc</th>
-                        <th class="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tổ/Nhóm nhận việc</th>
-                        <th class="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Thời hạn</th>
-                        <th class="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[9rem]">Tiến độ</th>
-                        <th class="text-left px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Trạng thái</th>
-                        <th class="text-right px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Hành động</th>
+                        <th class="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tên công việc</th>
+                        <th class="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tổ/Nhóm</th>
+                        <th class="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Thời hạn</th>
+                        <th class="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[7.5rem]">Tiến độ</th>
+                        <th class="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Trạng thái</th>
+                        <th class="text-right py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Hành động</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
                     {% for node in tree_nodes %}
                     {% if node.is_flat %}
                     {% with task=node.task %}
-                    <tr class="hover:bg-slate-50/80 transition">
-                        <td class="px-5 py-4 align-top">
-                            <a href="{% url 'manager_task_detail' task.pk %}" class="font-semibold text-gray-900 hover:text-primary transition">
+                    <tr class="hover:bg-gray-50/80 transition">
+                        <td class="py-3 px-4 align-middle">
+                            <a href="{% url 'manager_task_detail' task.pk %}" class="font-medium text-gray-900 hover:text-primary transition">
                                 {{ task.title }}
                             </a>
                             {% if task.description %}
                             <p class="text-xs text-gray-400 mt-0.5 line-clamp-1 max-w-xs">{{ task.description }}</p>
                             {% endif %}
-                            <p class="text-[11px] text-gray-400 mt-1">{{ task.get_cycle_display }}</p>
                         </td>
-                        <td class="px-5 py-4 align-top">
-                            <div class="flex flex-wrap gap-1.5 max-w-[16rem]">
+                        <td class="py-3 px-4 align-middle">
+                            <div class="flex flex-wrap items-center gap-1 max-w-[14rem]">
                                 {% if task.target_departments %}
-                                {% for d in task.target_departments %}
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ring-1 ring-inset {{ d.badge_classes }}">
-                                    <i class="fas fa-users text-[9px]"></i> {{ d.name }}
-                                </span>
-                                {% endfor %}
+                                    {% for d in task.target_departments %}
+                                        {% if forloop.counter <= 2 %}
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ring-1 ring-inset {{ d.badge_classes }}">
+                                            {{ d.name }}
+                                        </span>
+                                        {% endif %}
+                                    {% endfor %}
+                                    {% if task.target_departments|length > 2 %}
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-600"
+                                          title="{% for d in task.target_departments %}{% if forloop.counter > 2 %}{{ d.name }}{% if not forloop.last %}, {% endif %}{% endif %}{% endfor %}">
+                                        +{{ task.target_departments|length|add:"-2" }} nhóm khác
+                                    </span>
+                                    {% endif %}
                                 {% elif task.primary_department %}
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ring-1 ring-inset {{ task.primary_department.badge_classes }}">
-                                    <i class="fas fa-flag text-[9px]"></i> {{ task.primary_department.name }}
-                                </span>
-                                {% for d in task.coordinating_departments.all %}
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ring-1 ring-inset {{ d.badge_classes }} opacity-90">
-                                    <i class="fas fa-handshake text-[9px]"></i> {{ d.name }}
-                                </span>
-                                {% endfor %}
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ring-1 ring-inset {{ task.primary_department.badge_classes }}">
+                                        {{ task.primary_department.name }}
+                                    </span>
+                                    {% for d in task.coordinating_departments.all %}
+                                        {% if forloop.first %}
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ring-1 ring-inset {{ d.badge_classes }} opacity-90">
+                                            {{ d.name }}
+                                        </span>
+                                        {% endif %}
+                                    {% endfor %}
+                                    {% with coord_count=task.coordinating_departments.all|length %}
+                                    {% if coord_count > 1 %}
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-600"
+                                          title="{% for d in task.coordinating_departments.all %}{% if not forloop.first %}{{ d.name }}{% if not forloop.last %}, {% endif %}{% endif %}{% endfor %}">
+                                        +{{ coord_count|add:"-1" }} nhóm khác
+                                    </span>
+                                    {% endif %}
+                                    {% endwith %}
                                 {% else %}
-                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 ring-1 ring-inset ring-slate-500/20">
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600">
                                     Cá nhân
                                 </span>
                                 {% endif %}
                             </div>
                         </td>
-                        <td class="px-5 py-4 align-top whitespace-nowrap">
-                            {% if task.row_is_overdue %}
-                            <span class="inline-flex items-center gap-1.5 text-red-600 font-medium">
-                                <i class="fas fa-exclamation-circle"></i>
-                                {{ task.deadline|date:"d/m/Y" }}
-                            </span>
-                            {% else %}
-                            <span class="text-gray-700">{{ task.deadline|date:"d/m/Y" }}</span>
-                            {% endif %}
+                        <td class="py-3 px-4 align-middle whitespace-nowrap {% if task.row_is_overdue %}bg-red-50 text-red-700 font-medium{% else %}text-gray-700{% endif %}">
+                            {{ task.deadline|date:"d/m/Y" }}
                         </td>
-                        <td class="px-5 py-4 align-top">
-                            <div class="flex items-center gap-2 mb-1">
-                                <div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                                    <div class="h-full rounded-full transition-all {% if task.progress_pct >= 100 %}bg-emerald-500{% elif task.progress_pct >= 70 %}bg-amber-400{% elif task.progress_pct >= 40 %}bg-blue-500{% else %}bg-gray-400{% endif %}"
+                        <td class="py-3 px-4 align-middle">
+                            <div class="flex items-center gap-2 min-w-[6.5rem]">
+                                <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                    <div class="h-full rounded-full {% if task.progress_pct >= 100 %}bg-emerald-500{% elif task.progress_pct >= 70 %}bg-amber-400{% elif task.progress_pct >= 40 %}bg-blue-500{% else %}bg-gray-400{% endif %}"
                                          style="width: {{ task.progress_pct }}%"></div>
                                 </div>
-                                <span class="text-xs font-semibold text-gray-600 w-8 text-right">{{ task.progress_pct }}%</span>
+                                <span class="text-xs text-gray-600 tabular-nums shrink-0">{{ task.progress_pct }}%</span>
                             </div>
-                            <p class="text-[11px] text-gray-400">{{ task.progress_label }}</p>
                         </td>
-                        <td class="px-5 py-4 align-top">
-                            <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-medium {{ task.display_status_pill }}">
+                        <td class="py-3 px-4 align-middle">
+                            <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium {{ task.display_status_pill }}">
                                 {{ task.display_status_label }}
                             </span>
                         </td>
-                        <td class="px-5 py-4 align-top">
-                            <div class="flex items-center justify-end gap-1.5">
+                        <td class="py-3 px-4 align-middle">
+                            <div class="flex items-center justify-end gap-1">
                                 <a href="{% url 'manager_task_detail' task.pk %}"
-                                   class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 transition"
-                                   title="Chi tiết">
-                                    <i class="fas fa-eye"></i> Chi tiết
+                                   class="inline-flex items-center px-2.5 py-1.5 rounded-md text-sm text-gray-600 hover:text-blue-700 hover:bg-blue-50 transition">
+                                    Chi tiết
                                 </a>
-                                <button type="button"
-                                        class="btn-edit p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition"
-                                        title="Sửa"
-                                        data-id="{{ task.pk }}"
-                                        data-title="{{ task.title|escape }}"
-                                        data-description="{{ task.description|escape }}"
-                                        data-deadline="{{ task.deadline|date:'Y-m-d' }}">
-                                    <i class="fas fa-pen"></i>
-                                </button>
-                                <div class="relative" data-extend-wrap>
+                                <div class="relative" data-actions-wrap>
                                     <button type="button"
-                                            class="btn-extend-toggle p-2 rounded-lg text-amber-600 hover:bg-amber-50 transition"
-                                            title="Gia hạn nhanh">
-                                        <i class="fas fa-calendar-plus"></i>
+                                            class="btn-actions-toggle p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+                                            aria-label="Thêm hành động"
+                                            aria-expanded="false">
+                                        <i class="fas fa-ellipsis"></i>
                                     </button>
-                                    <div class="extend-menu hidden absolute right-0 top-full mt-1 z-20 w-40 bg-white border border-gray-200 rounded-xl shadow-lg py-1">
+                                    <div class="actions-menu hidden absolute right-0 top-full mt-1 z-30 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+                                        <button type="button"
+                                                class="btn-edit w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                                data-id="{{ task.pk }}"
+                                                data-title="{{ task.title|escape }}"
+                                                data-description="{{ task.description|escape }}"
+                                                data-deadline="{{ task.deadline|date:'Y-m-d' }}">
+                                            <i class="fas fa-pen w-4 text-gray-400"></i> Sửa
+                                        </button>
                                         <form method="post" action="{% url 'manager_task_extend' task.pk %}">
                                             {% csrf_token %}
                                             <input type="hidden" name="days" value="3">
-                                            <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-amber-50">+ 3 ngày</button>
+                                            <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                                <i class="fas fa-calendar-plus w-4 text-gray-400"></i> Gia hạn +3 ngày
+                                            </button>
                                         </form>
                                         <form method="post" action="{% url 'manager_task_extend' task.pk %}">
                                             {% csrf_token %}
                                             <input type="hidden" name="days" value="5">
-                                            <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-amber-50">+ 5 ngày</button>
+                                            <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                                <i class="fas fa-calendar-plus w-4 text-gray-400"></i> Gia hạn +5 ngày
+                                            </button>
                                         </form>
+                                        <div class="border-t border-gray-100 my-1"></div>
+                                        <button type="button"
+                                                class="btn-delete w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                                                data-id="{{ task.pk }}"
+                                                data-title="{{ task.title|escape }}">
+                                            <i class="fas fa-trash-alt w-4"></i> Xóa
+                                        </button>
                                     </div>
                                 </div>
-                                <button type="button"
-                                        class="btn-delete p-2 rounded-lg text-red-600 hover:bg-red-50 transition"
-                                        title="Xóa"
-                                        data-id="{{ task.pk }}"
-                                        data-title="{{ task.title|escape }}">
-                                    <i class="fas fa-trash-alt"></i>
-                                </button>
                             </div>
                         </td>
                     </tr>
                     {% endwith %}
                     {% else %}
-                    {# Nhóm batch / tổ — một hàng phẳng, badge tóm tắt #}
-                    <tr class="hover:bg-slate-50/80 transition">
-                        <td class="px-5 py-4 align-top">
+                    {# Nhóm batch / tổ — một hàng phẳng #}
+                    <tr class="hover:bg-gray-50/80 transition">
+                        <td class="py-3 px-4 align-middle">
                             {% if node.task %}
                             <a href="{% url 'manager_task_detail' node.task.pk %}"
-                               class="font-semibold text-gray-900 hover:text-primary transition">
+                               class="font-medium text-gray-900 hover:text-primary transition">
                                 {{ node.title }}
                             </a>
                             {% else %}
-                            <span class="font-semibold text-gray-900">{{ node.title }}</span>
+                            <span class="font-medium text-gray-900">{{ node.title }}</span>
                             {% endif %}
-                            <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
-                                {% if node.total %}
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 ring-1 ring-inset ring-blue-600/15">
-                                    {{ node.done }}/{{ node.total }} xong
-                                </span>
-                                {% endif %}
-                                {% if node.departments %}
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-50 text-slate-600 ring-1 ring-inset ring-slate-200">
-                                    {{ node.departments|length }} tổ
-                                </span>
-                                {% endif %}
-                            </div>
                             {% if node.description %}
-                            <p class="text-xs text-gray-400 mt-1 line-clamp-1 max-w-xs">{{ node.description }}</p>
-                            {% endif %}
-                            {% if node.cycle_display %}
-                            <p class="text-[11px] text-gray-400 mt-1">{{ node.cycle_display }}</p>
+                            <p class="text-xs text-gray-400 mt-0.5 line-clamp-1 max-w-xs">{{ node.description }}</p>
                             {% endif %}
                         </td>
-                        <td class="px-5 py-4 align-top">
-                            <div class="flex flex-wrap gap-1.5 max-w-[16rem]">
+                        <td class="py-3 px-4 align-middle">
+                            <div class="flex flex-wrap items-center gap-1 max-w-[14rem]">
                                 {% for d in node.departments %}
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ring-1 ring-inset {{ d.badge_classes }}">
-                                    <i class="fas fa-users text-[9px]"></i> {{ d.name }}
-                                </span>
+                                    {% if forloop.counter <= 2 %}
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ring-1 ring-inset {{ d.badge_classes }}">
+                                        {{ d.name }}
+                                    </span>
+                                    {% endif %}
                                 {% empty %}
                                 <span class="text-xs text-gray-400">—</span>
                                 {% endfor %}
+                                {% if node.departments|length > 2 %}
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-gray-100 text-gray-600"
+                                      title="{% for d in node.departments %}{% if forloop.counter > 2 %}{{ d.name }}{% if not forloop.last %}, {% endif %}{% endif %}{% endfor %}">
+                                    +{{ node.departments|length|add:"-2" }} nhóm khác
+                                </span>
+                                {% endif %}
                             </div>
                         </td>
-                        <td class="px-5 py-4 align-top whitespace-nowrap">
-                            {% if node.row_is_overdue %}
-                            <span class="inline-flex items-center gap-1.5 text-red-600 font-medium">
-                                <i class="fas fa-exclamation-circle"></i>
-                                {{ node.deadline|date:"d/m/Y" }}
-                            </span>
-                            {% else %}
-                            <span class="text-gray-700">{{ node.deadline|date:"d/m/Y" }}</span>
-                            {% endif %}
+                        <td class="py-3 px-4 align-middle whitespace-nowrap {% if node.row_is_overdue %}bg-red-50 text-red-700 font-medium{% else %}text-gray-700{% endif %}">
+                            {{ node.deadline|date:"d/m/Y" }}
                         </td>
-                        <td class="px-5 py-4 align-top">
-                            <div class="flex items-center gap-2 mb-1">
-                                <div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                                    <div class="h-full rounded-full transition-all {% if node.pct >= 100 %}bg-emerald-500{% elif node.pct >= 70 %}bg-amber-400{% elif node.pct >= 40 %}bg-blue-500{% else %}bg-gray-400{% endif %}"
+                        <td class="py-3 px-4 align-middle">
+                            <div class="flex items-center gap-2 min-w-[6.5rem]">
+                                <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                    <div class="h-full rounded-full {% if node.pct >= 100 %}bg-emerald-500{% elif node.pct >= 70 %}bg-amber-400{% elif node.pct >= 40 %}bg-blue-500{% else %}bg-gray-400{% endif %}"
                                          style="width: {{ node.pct }}%"></div>
                                 </div>
-                                <span class="text-xs font-semibold text-gray-600 w-8 text-right">{{ node.pct }}%</span>
+                                <span class="text-xs text-gray-600 tabular-nums shrink-0">{{ node.pct }}%</span>
                             </div>
-                            <p class="text-[11px] text-gray-400">{{ node.progress_label }}</p>
                         </td>
-                        <td class="px-5 py-4 align-top">
-                            <span class="inline-flex px-2.5 py-1 rounded-full text-xs font-medium {{ node.display_status_pill }}">
+                        <td class="py-3 px-4 align-middle">
+                            <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium {{ node.display_status_pill }}">
                                 {{ node.display_status_label }}
                             </span>
                         </td>
-                        <td class="px-5 py-4 align-top">
-                            <div class="flex items-center justify-end gap-1.5">
+                        <td class="py-3 px-4 align-middle">
+                            <div class="flex items-center justify-end gap-1">
                                 {% if node.task %}
                                 <a href="{% url 'manager_task_detail' node.task.pk %}"
-                                   class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 transition"
-                                   title="Chi tiết">
-                                    <i class="fas fa-eye"></i> Chi tiết
+                                   class="inline-flex items-center px-2.5 py-1.5 rounded-md text-sm text-gray-600 hover:text-blue-700 hover:bg-blue-50 transition">
+                                    Chi tiết
                                 </a>
                                 {% if not node.is_batch_group %}
-                                <button type="button"
-                                        class="btn-edit p-2 rounded-lg text-blue-600 hover:bg-blue-50 transition"
-                                        title="Sửa"
-                                        data-id="{{ node.task.pk }}"
-                                        data-title="{{ node.task.title|escape }}"
-                                        data-description="{{ node.task.description|escape }}"
-                                        data-deadline="{{ node.task.deadline|date:'Y-m-d' }}">
-                                    <i class="fas fa-pen"></i>
-                                </button>
-                                <div class="relative" data-extend-wrap>
+                                <div class="relative" data-actions-wrap>
                                     <button type="button"
-                                            class="btn-extend-toggle p-2 rounded-lg text-amber-600 hover:bg-amber-50 transition"
-                                            title="Gia hạn nhanh">
-                                        <i class="fas fa-calendar-plus"></i>
+                                            class="btn-actions-toggle p-1.5 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+                                            aria-label="Thêm hành động"
+                                            aria-expanded="false">
+                                        <i class="fas fa-ellipsis"></i>
                                     </button>
-                                    <div class="extend-menu hidden absolute right-0 top-full mt-1 z-20 w-40 bg-white border border-gray-200 rounded-xl shadow-lg py-1">
+                                    <div class="actions-menu hidden absolute right-0 top-full mt-1 z-30 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
+                                        <button type="button"
+                                                class="btn-edit w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                                                data-id="{{ node.task.pk }}"
+                                                data-title="{{ node.task.title|escape }}"
+                                                data-description="{{ node.task.description|escape }}"
+                                                data-deadline="{{ node.task.deadline|date:'Y-m-d' }}">
+                                            <i class="fas fa-pen w-4 text-gray-400"></i> Sửa
+                                        </button>
                                         <form method="post" action="{% url 'manager_task_extend' node.task.pk %}">
                                             {% csrf_token %}
                                             <input type="hidden" name="days" value="3">
-                                            <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-amber-50">+ 3 ngày</button>
+                                            <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                                <i class="fas fa-calendar-plus w-4 text-gray-400"></i> Gia hạn +3 ngày
+                                            </button>
                                         </form>
                                         <form method="post" action="{% url 'manager_task_extend' node.task.pk %}">
                                             {% csrf_token %}
                                             <input type="hidden" name="days" value="5">
-                                            <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-amber-50">+ 5 ngày</button>
+                                            <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                                <i class="fas fa-calendar-plus w-4 text-gray-400"></i> Gia hạn +5 ngày
+                                            </button>
                                         </form>
+                                        <div class="border-t border-gray-100 my-1"></div>
+                                        <button type="button"
+                                                class="btn-delete w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                                                data-id="{{ node.task.pk }}"
+                                                data-title="{{ node.task.title|escape }}">
+                                            <i class="fas fa-trash-alt w-4"></i> Xóa
+                                        </button>
                                     </div>
                                 </div>
-                                <button type="button"
-                                        class="btn-delete p-2 rounded-lg text-red-600 hover:bg-red-50 transition"
-                                        title="Xóa"
-                                        data-id="{{ node.task.pk }}"
-                                        data-title="{{ node.task.title|escape }}">
-                                    <i class="fas fa-trash-alt"></i>
-                                </button>
                                 {% endif %}
                                 {% endif %}
                             </div>
@@ -344,7 +309,7 @@
                     {% endif %}
                     {% empty %}
                     <tr>
-                        <td colspan="6" class="px-5 py-16 text-center text-gray-400">
+                        <td colspan="6" class="py-16 px-4 text-center text-gray-400">
                             <i class="fas fa-inbox text-3xl mb-3 block opacity-40"></i>
                             <p class="text-sm">Chưa có công việc nào{% if q or status_filter or dept_filter %} khớp bộ lọc{% endif %}.</p>
                         </td>
@@ -355,7 +320,7 @@
         </div>
 
         {% if page_obj.paginator.num_pages > 1 %}
-        <div class="px-5 py-3.5 border-t border-gray-100 flex items-center justify-between gap-3">
+        <div class="px-4 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
             <p class="text-xs text-gray-500">
                 Trang {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}
                 · {{ page_obj.paginator.count }} công việc
@@ -363,11 +328,11 @@
             <div class="flex gap-2">
                 {% if page_obj.has_previous %}
                 <a href="?page={{ page_obj.previous_page_number }}&q={{ q }}&status={{ status_filter }}&dept={{ dept_filter }}"
-                   class="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">Trước</a>
+                   class="px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50">Trước</a>
                 {% endif %}
                 {% if page_obj.has_next %}
                 <a href="?page={{ page_obj.next_page_number }}&q={{ q }}&status={{ status_filter }}&dept={{ dept_filter }}"
-                   class="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50">Sau</a>
+                   class="px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50">Sau</a>
                 {% endif %}
             </div>
         </div>
@@ -473,6 +438,7 @@
 
     document.querySelectorAll('.btn-edit').forEach(function (btn) {
         btn.addEventListener('click', function () {
+            closeAllMenus();
             openEdit({
                 id: btn.getAttribute('data-id'),
                 title: btn.getAttribute('data-title'),
@@ -486,22 +452,35 @@
         if (el) el.addEventListener('click', closeEdit);
     });
 
-    document.querySelectorAll('[data-extend-wrap]').forEach(function (wrap) {
-        var toggle = wrap.querySelector('.btn-extend-toggle');
-        var menu = wrap.querySelector('.extend-menu');
+    function closeAllMenus() {
+        document.querySelectorAll('.actions-menu').forEach(function (m) {
+            m.classList.add('hidden');
+        });
+        document.querySelectorAll('.btn-actions-toggle').forEach(function (b) {
+            b.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    document.querySelectorAll('[data-actions-wrap]').forEach(function (wrap) {
+        var toggle = wrap.querySelector('.btn-actions-toggle');
+        var menu = wrap.querySelector('.actions-menu');
         if (!toggle || !menu) return;
         toggle.addEventListener('click', function (e) {
             e.stopPropagation();
-            document.querySelectorAll('.extend-menu').forEach(function (m) {
-                if (m !== menu) m.classList.add('hidden');
-            });
-            menu.classList.toggle('hidden');
+            var willOpen = menu.classList.contains('hidden');
+            closeAllMenus();
+            if (willOpen) {
+                menu.classList.remove('hidden');
+                toggle.setAttribute('aria-expanded', 'true');
+            }
+        });
+        menu.addEventListener('click', function (e) {
+            e.stopPropagation();
         });
     });
-    document.addEventListener('click', function () {
-        document.querySelectorAll('.extend-menu').forEach(function (m) {
-            m.classList.add('hidden');
-        });
+    document.addEventListener('click', closeAllMenus);
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeAllMenus();
     });
 
     var deleteModal = document.getElementById('delete-modal');
@@ -520,6 +499,7 @@
     }
     document.querySelectorAll('.btn-delete').forEach(function (btn) {
         btn.addEventListener('click', function () {
+            closeAllMenus();
             openDelete(btn.getAttribute('data-id'), btn.getAttribute('data-title'));
         });
     });
