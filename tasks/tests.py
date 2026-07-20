@@ -723,6 +723,76 @@ class UnifiedAssignmentDashboardTestCase(TestCase):
         self.assertEqual(a2.status, TaskAssignment.STATUS_COMPLETED)
         self.assertEqual(a2.evaluation_result, EvaluationResult.DAT)
 
+    def test_leaderless_primary_dept_canonical_assignee_can_add_members(self):
+        """
+        Khi Tổ Chủ trì chưa gắn leader_id, assignee canonical vẫn thêm được thành viên
+        (tránh mất nút + Thêm thành viên như case Soạn đề kiểm tra giữa kì).
+        """
+        member = User.objects.create_user(
+            username='orphan_member',
+            password='x',
+            is_manager=False,
+            first_name='Quốc',
+            last_name='Bảo',
+        )
+        extra = User.objects.create_user(
+            username='orphan_extra',
+            password='x',
+            is_manager=False,
+            first_name='Phương',
+            last_name='Bình',
+        )
+        self.dept1.leader = None
+        self.dept1.save(update_fields=['leader'])
+        self.dept1.members.add(member, extra)
+
+        task = Task.objects.create(
+            title='Soạn đề kiểm tra giữa kì',
+            created_by=self.manager,
+            deadline=self.today + timedelta(days=10),
+            cycle=Task.CYCLE_MONTH,
+            primary_department=self.dept1,
+        )
+        asg = TaskAssignment.objects.create(task=task, assignee=member)
+        TaskParticipation.objects.create(
+            task=task,
+            user=member,
+            department=self.dept1,
+            role=TaskParticipation.ROLE_LEAD,
+        )
+
+        self.assertTrue(task.is_primary_leader(member))
+        self.assertTrue(task.can_manage_task_members(member))
+        self.assertFalse(task.is_primary_leader(extra))
+
+        self.client.force_login(member)
+        detail = self.client.get(reverse('staff_task_detail', kwargs={'pk': asg.pk}))
+        self.assertEqual(detail.status_code, 200)
+        self.assertTrue(detail.context['can_manage_members'])
+        self.assertContains(detail, 'Thêm thành viên')
+        self.assertContains(detail, 'btn-open-add-members')
+
+        add = self.client.post(
+            reverse('staff_task_add_members', kwargs={'pk': asg.pk}),
+            {'member_ids': [extra.pk]},
+        )
+        self.assertRedirects(add, reverse('staff_task_detail', kwargs={'pk': asg.pk}))
+        self.assertTrue(
+            task.participations.filter(user=extra, department=self.dept1).exists()
+        )
+        self.assertTrue(task.assignments.filter(assignee=extra).exists())
+        self.assertTrue(
+            Notification.objects.filter(recipient=extra, related_task=task).exists()
+        )
+
+        # Thành viên thường (không phải canonical) không được thêm
+        self.client.force_login(extra)
+        forbidden = self.client.post(
+            reverse('staff_task_add_members', kwargs={'pk': asg.pk}),
+            {'member_ids': [self.leader1.pk]},
+        )
+        self.assertEqual(forbidden.status_code, 403)
+
     def test_grade_modal_requires_evaluation_result_choice(self):
         self.assertTrue(
             ReviewForm({'evaluation_result': EvaluationResult.DAT, 'manager_comment': 'ok'}).is_valid()
@@ -1566,6 +1636,7 @@ class StaffTaskDetailOversightTestCase(TestCase):
         self.assertContains(resp, self.task.title)
         # Chỉ xem oversight — không cập nhật tiến độ thay thành viên
         self.assertFalse(resp.context['can_update'])
+
 
 class AddTaskPerformersTestCase(TestCase):
     """Thêm cá nhân / Tổ vào công việc đã giao (manager detail)."""

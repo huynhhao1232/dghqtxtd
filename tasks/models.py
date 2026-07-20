@@ -231,22 +231,76 @@ class Task(models.Model):
     def is_primary_leader(self, user):
         if not user or not self.primary_department_id:
             return False
-        return self.primary_department.leader_id == user.id
+        if self.primary_department.leader_id == user.id:
+            return True
+        # Tổ Chủ trì chưa gắn Trưởng tổ: assignee canonical được quyền điều phối
+        # (thêm thành viên, phân rã, chốt tiến độ) — tránh mất UI khi leader_id trống.
+        if (
+            self.is_team_task
+            and self.primary_department.leader_id is None
+            and self.assignments.filter(assignee_id=user.id).exists()
+        ):
+            canonical = self.get_canonical_assignment()
+            return bool(canonical and canonical.assignee_id == user.id)
+        return False
 
     def is_coordinating_leader(self, user):
         if not user or not self.is_team_task:
             return False
-        return self.coordinating_departments.filter(leader_id=user.id).exists()
+        if self.coordinating_departments.filter(leader_id=user.id).exists():
+            return True
+        # Tổ phối hợp chưa gắn Trưởng tổ: assignee thuộc tổ đó được điều phối phạm vi tổ mình.
+        for dept in self.coordinating_departments.all():
+            if dept.leader_id is not None:
+                continue
+            if self.assignments.filter(assignee_id=user.id).exists() and (
+                dept.members.filter(pk=user.id).exists()
+            ):
+                return True
+        return False
 
     def get_coordinating_department_for(self, user):
         """Tổ phối hợp mà user đang làm Trưởng tổ (trên task này)."""
         if not user:
             return None
-        return self.coordinating_departments.filter(leader_id=user.id).first()
+        found = self.coordinating_departments.filter(leader_id=user.id).first()
+        if found:
+            return found
+        for dept in self.coordinating_departments.all():
+            if dept.leader_id is not None:
+                continue
+            if self.assignments.filter(assignee_id=user.id).exists() and (
+                dept.members.filter(pk=user.id).exists()
+            ):
+                return dept
+        return None
 
     def is_department_leader(self, user):
         """True nếu là Trưởng tổ Chủ trì hoặc Trưởng tổ Phối hợp."""
         return self.is_primary_leader(user) or self.is_coordinating_leader(user)
+
+    def can_manage_task_members(self, user):
+        """
+        Ai được thêm/gỡ thành viên tham gia:
+        - Trưởng tổ Chủ trì / Phối hợp (hoặc assignee điều phối khi tổ chưa có Trưởng tổ)
+        - Trưởng tổ bản giao đồng loạt
+        - Người tạo task (không phải Ban Giám đốc — BGĐ dùng trang quản lý)
+        """
+        if not user or not getattr(user, 'is_authenticated', False):
+            return False
+        if self.is_subtask:
+            return False
+        if self.is_department_leader(user):
+            return True
+        if self.get_batch_department_for(user) is not None:
+            return True
+        if (
+            self.created_by_id == user.id
+            and not getattr(user, 'is_director', False)
+            and (self.is_team_task or self.is_batch_department_task)
+        ):
+            return True
+        return False
 
     def can_manage_subtasks(self, user):
         """Trưởng tổ Chủ trì hoặc Trưởng tổ của assignment batch được phân rã."""

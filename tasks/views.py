@@ -253,12 +253,22 @@ def _managed_department(assignment, user):
     task = assignment.task
     if task.is_primary_leader(user):
         return task.primary_department
-    return task.get_coordinating_department_for(user)
+    coord = task.get_coordinating_department_for(user)
+    if coord:
+        return coord
+    if (
+        task.created_by_id == user.id
+        and not getattr(user, 'is_director', False)
+        and task.primary_department_id
+    ):
+        return task.primary_department
+    return None
 
 
 def _require_any_team_leader(request, assignment):
+    task = assignment.task
     return (
-        assignment.task.is_department_leader(request.user)
+        task.can_manage_task_members(request.user)
         or _batch_department_for_assignment(assignment, request.user) is not None
     )
 
@@ -624,28 +634,24 @@ def staff_task_detail(request, pk):
         if canonical:
             display_assignment = canonical
 
-    # Thành viên có thể thêm: theo tổ của trưởng tổ đang xem
-    manage_dept = None
-    member_role = None
-    if is_batch_department_leader:
-        manage_dept = batch_dept
-        member_role = TaskParticipation.ROLE_LEAD
-    elif is_primary_leader:
-        manage_dept = task.primary_department
-        member_role = TaskParticipation.ROLE_LEAD
-    elif is_coord_leader:
-        manage_dept = coord_dept
-        member_role = TaskParticipation.ROLE_COORD
-
-    available_members = []
-    if manage_dept and display_assignment.status not in (
+    # Thành viên có thể thêm: theo tổ của trưởng tổ / người tạo đang xem
+    manage_dept = _managed_department(assignment, request.user)
+    can_manage_members = task.can_manage_task_members(request.user) or bool(
+        is_batch_department_leader
+    )
+    members_locked = display_assignment.status in (
         TaskAssignment.STATUS_PENDING,
         TaskAssignment.STATUS_COMPLETED,
-    ):
+    )
+    available_members = []
+    if manage_dept and can_manage_members and not members_locked:
         existing_ids = set(task.participations.values_list('user_id', flat=True))
         existing_ids.add(request.user.id)
-        # Không thêm các trưởng tổ khác đã có assignment
-        existing_ids.update(task.assignments.values_list('assignee_id', flat=True))
+        existing_ids.update(
+            task.assignments.exclude(assignee_id=None).values_list(
+                'assignee_id', flat=True
+            )
+        )
         available_members = list(
             User.objects.filter(
                 my_departments=manage_dept,
@@ -678,11 +684,8 @@ def staff_task_detail(request, pk):
             'is_primary_leader': is_primary_leader,
             'is_coord_leader': is_coord_leader,
             'is_team_leader': is_primary_leader or is_coord_leader,
-            'can_manage_members': (
-                is_primary_leader
-                or is_coord_leader
-                or is_batch_department_leader
-            ),
+            'can_manage_members': can_manage_members,
+            'members_locked': members_locked,
             'is_team_task': task.is_team_task,
             'is_department_assignment': assignment.is_department_target,
             'is_batch_department_leader': is_batch_department_leader,
@@ -909,7 +912,9 @@ def staff_task_add_members(request, pk):
     assignment = _get_staff_assignment(request, pk)
     task = assignment.task
     if not _require_any_team_leader(request, assignment):
-        return HttpResponseForbidden('Chỉ Trưởng tổ mới được thêm thành viên.')
+        return HttpResponseForbidden(
+            'Chỉ Trưởng tổ / người có quyền điều phối mới được thêm thành viên.'
+        )
 
     is_primary = task.is_primary_leader(request.user)
     batch_dept = _batch_department_for_assignment(assignment, request.user)
@@ -923,8 +928,21 @@ def staff_task_add_members(request, pk):
     if not manage_dept:
         return HttpResponseForbidden('Không xác định được tổ để thêm thành viên.')
 
+    if assignment.status in (
+        TaskAssignment.STATUS_PENDING,
+        TaskAssignment.STATUS_COMPLETED,
+    ):
+        messages.error(
+            request,
+            'Không thể thêm thành viên khi công việc đang chờ duyệt hoặc đã hoàn thành.',
+        )
+        return redirect('staff_task_detail', pk=pk)
+
     exclude_ids = list(task.participations.values_list('user_id', flat=True))
     exclude_ids.append(request.user.id)
+    exclude_ids.extend(
+        task.assignments.exclude(assignee_id=None).values_list('assignee_id', flat=True)
+    )
     form = AddMembersForm(
         request.POST,
         department=manage_dept,
@@ -947,7 +965,6 @@ def staff_task_add_members(request, pk):
         if created:
             added += 1
         else:
-            # Cập nhật role/dept nếu đã tồn tại nhưng thiếu
             updates = []
             if not part.department_id:
                 part.department = manage_dept
@@ -957,9 +974,25 @@ def staff_task_add_members(request, pk):
                 updates.append('role')
             if updates:
                 part.save(update_fields=updates)
-        # Batch giữ assignment cha theo tổ; user chỉ nhận assignment trên sub-task.
         if not batch_dept:
-            TaskAssignment.objects.get_or_create(task=task, assignee=user)
+            _, asg_created = TaskAssignment.objects.get_or_create(
+                task=task, assignee=user
+            )
+            if created and not asg_created:
+                Notification.objects.create(
+                    recipient=user,
+                    message=f'Bạn được thêm vào công việc nhóm: {task.title}',
+                    related_task=task,
+                )
+        elif created:
+            Notification.objects.create(
+                recipient=user,
+                message=(
+                    f'Bạn được Trưởng tổ thêm vào công việc "{task.title}" '
+                    f'(Tổ {manage_dept.name}). Hãy nhận nhiệm vụ con khi được giao.'
+                ),
+                related_task=task,
+            )
 
     if added:
         messages.success(request, f'Đã thêm {added} thành viên vào công việc.')

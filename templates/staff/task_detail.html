@@ -280,11 +280,11 @@
             <h2 class="text-base font-semibold text-gray-800">
                 <i class="fas fa-user-friends text-primary mr-2"></i>Thành viên thực hiện
             </h2>
-            {% if available_members and assignment.status != 'completed' and assignment.status != 'pending_review' %}
+            {% if not members_locked %}
             <button type="button" id="btn-open-add-members"
                     class="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-primary text-white hover:bg-blue-800 transition-colors">
                 <i class="fas fa-user-plus"></i>
-                Thêm thành viên{% if is_coord_leader or is_batch_department_leader %} (Tổ mình){% endif %}
+                + Thêm thành viên{% if is_coord_leader or is_batch_department_leader %} (Tổ mình){% endif %}
             </button>
             {% endif %}
         </div>
@@ -316,6 +316,10 @@
             <li class="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-50 text-sm text-emerald-800">{{ p.user }}</li>
             {% endfor %}
         </ul>
+        <p class="mt-3 text-xs text-gray-500">
+            <i class="fas fa-info-circle mr-1"></i>
+            Chỉ Trưởng tổ Chủ trì (hoặc Trưởng tổ Phối hợp với tổ mình) mới được thêm thành viên vào nhiệm vụ này.
+        </p>
     </div>
     {% endif %}
     {% endif %}
@@ -621,16 +625,34 @@
         </div>
         <form method="post" action="{% url 'staff_task_add_members' my_assignment.pk %}" class="flex flex-col flex-1 min-h-0">
             {% csrf_token %}
-            <div class="px-5 py-4 overflow-y-auto flex-1 space-y-2">
+            <div class="px-5 pt-3 pb-2">
+                <label class="sr-only" for="add-member-search">Tìm thành viên</label>
+                <div class="relative">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                    <input type="search" id="add-member-search" placeholder="Tìm theo tên…"
+                           class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                           autocomplete="off">
+                </div>
+            </div>
+            <div class="px-5 py-2 overflow-y-auto flex-1 space-y-2" id="add-member-list">
                 {% for m in available_members %}
-                <label class="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50/40 cursor-pointer">
+                <label class="flex items-center gap-3 px-3 py-2.5 rounded-xl border border-gray-100 hover:border-blue-200 hover:bg-blue-50/40 cursor-pointer"
+                       data-member-name="{{ m.get_full_name|default:m.username|lower }}">
                     <input type="checkbox" name="member_ids" value="{{ m.id }}" class="rounded border-gray-300 text-primary focus:ring-primary">
                     <img src="{{ m.avatar_url }}" alt="" class="w-8 h-8 rounded-full">
                     <span class="text-sm font-medium text-gray-800">{{ m }}</span>
                 </label>
                 {% empty %}
-                <p class="text-sm text-gray-500 text-center py-8">Không còn thành viên để thêm.</p>
+                <p class="text-sm text-gray-500 text-center py-8">
+                    {% if manage_dept %}
+                    Không còn thành viên nào trong {{ manage_dept.name }} để thêm
+                    (đã có trên task hoặc chưa được gắn vào tổ).
+                    {% else %}
+                    Không còn thành viên để thêm.
+                    {% endif %}
+                </p>
                 {% endfor %}
+                <p id="add-member-empty-filter" class="hidden text-sm text-gray-500 text-center py-6">Không tìm thấy thành viên khớp.</p>
             </div>
             <div class="px-5 py-4 border-t border-gray-100 flex justify-end gap-2">
                 <button type="button" data-close-add-members class="px-4 py-2 rounded-lg text-sm bg-gray-100 text-gray-700">Hủy</button>
@@ -703,6 +725,25 @@
     document.querySelectorAll('[data-close-add-members]').forEach(function (el) {
         el.addEventListener('click', function () { showAdd(false); });
     });
+    var addSearch = document.getElementById('add-member-search');
+    var addList = document.getElementById('add-member-list');
+    var addFilterEmpty = document.getElementById('add-member-empty-filter');
+    if (addSearch && addList) {
+        addSearch.addEventListener('input', function () {
+            var q = (addSearch.value || '').trim().toLowerCase();
+            var labels = addList.querySelectorAll('[data-member-name]');
+            var visible = 0;
+            labels.forEach(function (el) {
+                var name = el.getAttribute('data-member-name') || '';
+                var show = !q || name.indexOf(q) !== -1;
+                el.classList.toggle('hidden', !show);
+                if (show) visible += 1;
+            });
+            if (addFilterEmpty) {
+                addFilterEmpty.classList.toggle('hidden', !q || visible > 0 || labels.length === 0);
+            }
+        });
+    }
 
     var evalModal = document.getElementById('modal-evaluate');
     function showEval(v) {
