@@ -40,35 +40,35 @@
             <table class="min-w-full divide-y divide-gray-200 text-sm">
                 <thead class="bg-gray-50">
                     <tr>
-                        <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Viên chức</th>
-                        <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Vai trò</th>
-                        <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tổ/Nhóm</th>
-                        <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Chức vụ</th>
-                        <th class="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Trạng thái</th>
-                        <th class="px-5 py-3.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Hành động</th>
+                        <th class="align-middle py-4 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Viên chức</th>
+                        <th class="align-middle py-4 px-4 whitespace-nowrap text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Vai trò</th>
+                        <th class="align-middle py-4 px-4 whitespace-nowrap text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tổ/Nhóm</th>
+                        <th class="align-middle py-4 px-4 whitespace-nowrap text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Chức vụ</th>
+                        <th class="align-middle py-4 px-4 whitespace-nowrap text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Trạng thái</th>
+                        <th class="align-middle py-4 px-4 whitespace-nowrap text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Hành động</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
                     {% for s in staff_list %}
                     <tr class="hover:bg-gray-50/80 transition-colors">
-                        <td class="px-5 py-3.5">
+                        <td class="align-middle py-4 px-4">
                             <div class="flex items-center gap-3">
-                                <img src="{{ s.avatar_url }}" alt="" class="h-10 w-10 rounded-full object-cover border border-gray-200">
+                                <img src="{{ s.avatar_url }}" alt="" class="h-10 w-10 rounded-full object-cover border border-gray-200 shrink-0">
                                 <div>
-                                    <p class="font-medium text-gray-900">{{ s.full_name_vn }}</p>
-                                    <p class="text-xs text-gray-400">@{{ s.username }}{% if s.email %} · {{ s.email }}{% endif %}</p>
+                                    <div class="text-sm font-semibold text-gray-900">{{ s.full_name_vn }}</div>
+                                    <div class="text-xs text-gray-500">@{{ s.username }}{% if s.email %} · {{ s.email }}{% endif %}</div>
                                 </div>
                             </div>
                         </td>
-                        <td class="px-5 py-3.5">
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                        <td class="align-middle py-4 px-4 whitespace-nowrap">
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap
                                 {% if s.role == 'department' %}bg-indigo-50 text-indigo-700 ring-1 ring-inset ring-indigo-600/20
                                 {% elif s.role == 'director' %}bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-600/20
                                 {% else %}bg-gray-50 text-gray-700 ring-1 ring-inset ring-gray-500/20{% endif %}">
                                 {{ s.role_label }}
                             </span>
                         </td>
-                        <td class="px-5 py-3.5">
+                        <td class="align-middle py-4 px-4 whitespace-nowrap">
                             {% with depts=s.my_departments.all %}
                             {% if depts %}
                             <div class="flex flex-wrap gap-1">
@@ -83,32 +83,32 @@
                             {% endif %}
                             {% endwith %}
                         </td>
-                        <td class="px-5 py-3.5 text-gray-600">{{ s.position|default:"—" }}</td>
-                        <td class="px-5 py-3.5">
+                        <td class="align-middle py-4 px-4 whitespace-nowrap text-gray-600">{{ s.position|default:"—" }}</td>
+                        <td class="align-middle py-4 px-4 whitespace-nowrap">
                             {% if s.is_active %}
-                            <span class="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
-                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Đang hoạt động
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700 whitespace-nowrap">
+                                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span> Đang hoạt động
                             </span>
                             {% else %}
-                            <span class="inline-flex items-center gap-1.5 text-xs font-medium text-red-600">
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 whitespace-nowrap">
                                 <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Đã khóa
                             </span>
                             {% endif %}
                         </td>
-                        <td class="px-5 py-3.5 text-right">
-                            <div class="inline-flex items-center gap-2">
+                        <td class="align-middle py-4 px-4 whitespace-nowrap text-right">
+                            <div class="flex items-center justify-end gap-2">
                                 <a href="?action=edit&staff_id={{ s.pk }}{% if dept_filter %}&department={{ dept_filter }}{% endif %}{% if q %}&q={{ q }}{% endif %}"
-                                   class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-50 text-primary hover:bg-blue-100">
-                                    <i class="fas fa-pen mr-1"></i> Sửa
+                                   class="p-2 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50" title="Sửa">
+                                    <i class="fas fa-pen"></i>
                                 </a>
                                 <form method="post" class="inline">
                                     {% csrf_token %}
                                     <input type="hidden" name="action" value="toggle_active">
                                     <input type="hidden" name="staff_id" value="{{ s.pk }}">
                                     <button type="submit"
-                                            class="px-3 py-1.5 text-xs font-medium rounded-lg {% if s.is_active %}bg-red-50 text-red-600 hover:bg-red-100{% else %}bg-emerald-50 text-emerald-700 hover:bg-emerald-100{% endif %}">
-                                        <i class="fas {% if s.is_active %}fa-lock{% else %}fa-lock-open{% endif %} mr-1"></i>
-                                        {% if s.is_active %}Khóa{% else %}Mở khóa{% endif %}
+                                            class="p-2 rounded-lg text-gray-400 {% if s.is_active %}hover:text-red-600 hover:bg-red-50{% else %}hover:text-green-600 hover:bg-green-50{% endif %}"
+                                            title="{% if s.is_active %}Khóa{% else %}Mở khóa{% endif %}">
+                                        <i class="fas {% if s.is_active %}fa-lock{% else %}fa-lock-open{% endif %}"></i>
                                     </button>
                                 </form>
                             </div>
@@ -116,7 +116,32 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="6" class="px-5 py-12 text-center text-gray-400">Không tìm thấy viên chức nào</td>
+                        <td colspan="6" class="p-0">
+                            <div class="w-full py-16 min-h-[350px] flex flex-col items-center justify-center text-center px-4">
+                                <div class="bg-gray-50 rounded-full p-4 mb-4">
+                                    <i class="fas fa-search text-3xl text-gray-300"></i>
+                                </div>
+                                {% if q or dept_filter %}
+                                <p class="text-base font-semibold text-gray-900 mb-1">Không tìm thấy viên chức nào</p>
+                                <p class="text-sm text-gray-500 max-w-sm mb-6">Rất tiếc, không có kết quả nào phù hợp với bộ lọc hiện tại. Vui lòng thử lại với từ khóa khác.</p>
+                                {% else %}
+                                <p class="text-base font-semibold text-gray-900 mb-1">Chưa có viên chức</p>
+                                <p class="text-sm text-gray-500 max-w-sm mb-6">Hệ thống chưa có tài khoản viên chức nào. Hãy thêm viên chức đầu tiên để bắt đầu.</p>
+                                {% endif %}
+                                <div class="flex items-center gap-3">
+                                    {% if q or dept_filter %}
+                                    <a href="{% url 'manager_staff' %}"
+                                       class="inline-flex items-center px-4 py-2.5 border border-gray-300 text-sm font-medium rounded-xl text-gray-700 hover:bg-gray-50">
+                                        Xóa bộ lọc
+                                    </a>
+                                    {% endif %}
+                                    <a href="{% url 'manager_staff' %}?action=create"
+                                       class="inline-flex items-center px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-xl hover:bg-blue-800 shadow-sm">
+                                        + Thêm viên chức
+                                    </a>
+                                </div>
+                            </div>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
