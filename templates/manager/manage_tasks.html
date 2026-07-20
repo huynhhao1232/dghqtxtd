@@ -272,7 +272,6 @@
                                    class="text-primary font-medium hover:underline">
                                     Chi tiết
                                 </a>
-                                {% if not node.is_batch_group %}
                                 <div class="relative" data-actions-wrap>
                                     <button type="button"
                                             class="btn-actions-toggle p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-md cursor-pointer"
@@ -280,39 +279,42 @@
                                             aria-expanded="false">
                                         <i class="fas fa-ellipsis"></i>
                                     </button>
-                                    <div class="actions-menu hidden absolute right-0 top-full mt-1 z-30 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-left">
+                                    <div class="actions-menu hidden absolute right-0 top-full mt-1 z-30 w-48 bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-left">
                                         <button type="button"
                                                 class="btn-edit w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                                                 data-id="{{ node.task.pk }}"
-                                                data-title="{{ node.task.title|escape }}"
-                                                data-description="{{ node.task.description|escape }}"
-                                                data-deadline="{{ node.task.deadline|date:'Y-m-d' }}">
-                                            <i class="fas fa-pen w-4 text-gray-400"></i> Sửa
+                                                data-title="{{ node.title|escape }}"
+                                                data-description="{{ node.description|escape }}"
+                                                data-deadline="{{ node.deadline|date:'Y-m-d' }}">
+                                            <i class="fas fa-pen w-4 text-gray-400"></i>
+                                            {% if node.is_batch_group %}Sửa nhóm việc{% else %}Sửa{% endif %}
                                         </button>
                                         <form method="post" action="{% url 'manager_task_extend' node.task.pk %}">
                                             {% csrf_token %}
                                             <input type="hidden" name="days" value="3">
                                             <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                                                <i class="fas fa-calendar-plus w-4 text-gray-400"></i> Gia hạn +3 ngày
+                                                <i class="fas fa-calendar-plus w-4 text-gray-400"></i>
+                                                {% if node.is_batch_group %}Gia hạn nhóm +3 ngày{% else %}Gia hạn +3 ngày{% endif %}
                                             </button>
                                         </form>
                                         <form method="post" action="{% url 'manager_task_extend' node.task.pk %}">
                                             {% csrf_token %}
                                             <input type="hidden" name="days" value="5">
                                             <button type="submit" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-                                                <i class="fas fa-calendar-plus w-4 text-gray-400"></i> Gia hạn +5 ngày
+                                                <i class="fas fa-calendar-plus w-4 text-gray-400"></i>
+                                                {% if node.is_batch_group %}Gia hạn nhóm +5 ngày{% else %}Gia hạn +5 ngày{% endif %}
                                             </button>
                                         </form>
                                         <div class="border-t border-gray-100 my-1"></div>
                                         <button type="button"
                                                 class="btn-delete w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50"
                                                 data-id="{{ node.task.pk }}"
-                                                data-title="{{ node.task.title|escape }}">
-                                            <i class="fas fa-trash-alt w-4"></i> Xóa
+                                                data-title="{{ node.title|escape }}">
+                                            <i class="fas fa-trash-alt w-4"></i>
+                                            {% if node.is_batch_group %}Xóa nhóm việc{% else %}Xóa{% endif %}
                                         </button>
                                     </div>
                                 </div>
-                                {% endif %}
                                 {% endif %}
                             </div>
                         </td>
@@ -366,7 +368,7 @@
             <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1.5">Tiêu đề *</label>
                 <input type="text" name="title" id="edit-title" required
-                       value="{% if edit_task %}{{ edit_task.title }}{% endif %}"
+                       value="{% if edit_task %}{{ edit_display_title|default:edit_task.title }}{% endif %}"
                        class="w-full px-4 py-2.5 border border-gray-300 rounded-xl bg-white hover:border-blue-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition">
             </div>
             <div>

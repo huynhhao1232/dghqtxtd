@@ -1962,6 +1962,24 @@ def _get_managed_task_or_403(user, pk):
     return task
 
 
+def _managed_batch_siblings(user, task):
+    """
+    Các task cùng batch_key mà user được phép quản lý.
+    Task không thuộc batch → chỉ trả về chính nó.
+    """
+    if not task.batch_key:
+        return [task]
+    siblings = [
+        t
+        for t in Task.objects.filter(
+            parent_task__isnull=True,
+            batch_key=task.batch_key,
+        ).order_by('pk')
+        if _user_can_administer_managed_task(user, t)
+    ]
+    return siblings or [task]
+
+
 @assigner_required
 @require_http_methods(['GET'])
 def manager_manage_tasks(request):
@@ -2033,9 +2051,13 @@ def manager_manage_tasks(request):
     edit_task_id = request.GET.get('edit')
     edit_form = None
     edit_task = None
+    edit_display_title = ''
     if edit_task_id and str(edit_task_id).isdigit():
         edit_task = _get_managed_task_or_403(request.user, int(edit_task_id))
         edit_form = TaskEditForm(instance=edit_task)
+        edit_display_title = (
+            edit_task.batch_display_title if edit_task.batch_key else edit_task.title
+        )
 
     return render(
         request,
@@ -2052,6 +2074,7 @@ def manager_manage_tasks(request):
             'status_choices': TaskAssignment.STATUS_CHOICES,
             'edit_form': edit_form,
             'edit_task': edit_task,
+            'edit_display_title': edit_display_title,
             'today': today,
         },
     )
@@ -2063,8 +2086,30 @@ def manager_task_edit(request, pk):
     task = _get_managed_task_or_403(request.user, pk)
     form = TaskEditForm(request.POST, instance=task)
     if form.is_valid():
-        form.save()
-        messages.success(request, f'Đã cập nhật công việc "{task.title}".')
+        siblings = _managed_batch_siblings(request.user, task)
+        new_title = form.cleaned_data['title']
+        new_description = form.cleaned_data['description']
+        new_deadline = form.cleaned_data['deadline']
+        if len(siblings) > 1:
+            with transaction.atomic():
+                for sibling in siblings:
+                    base = Task.strip_member_title_suffix(sibling.title)
+                    if base is not None:
+                        sibling.title = f'{new_title}{sibling.title[len(base):]}'
+                    else:
+                        sibling.title = new_title
+                    sibling.description = new_description
+                    sibling.deadline = new_deadline
+                    sibling.save(
+                        update_fields=['title', 'description', 'deadline', 'updated_at']
+                    )
+            messages.success(
+                request,
+                f'Đã cập nhật nhóm việc "{new_title}" ({len(siblings)} nhiệm vụ).',
+            )
+        else:
+            form.save()
+            messages.success(request, f'Đã cập nhật công việc "{task.title}".')
         return redirect('manager_manage_tasks')
     messages.error(request, 'Không thể lưu — vui lòng kiểm tra lại thông tin.')
     return redirect(f"{reverse('manager_manage_tasks')}?edit={pk}")
@@ -2080,12 +2125,24 @@ def manager_task_extend(request, pk):
         days = 3
     if days not in (3, 5):
         days = 3
-    task.deadline = task.deadline + timedelta(days=days)
-    task.save(update_fields=['deadline', 'updated_at'])
-    messages.success(
-        request,
-        f'Đã gia hạn "{task.title}" thêm {days} ngày (hạn mới: {task.deadline.strftime("%d/%m/%Y")}).',
-    )
+    siblings = _managed_batch_siblings(request.user, task)
+    with transaction.atomic():
+        for sibling in siblings:
+            sibling.deadline = sibling.deadline + timedelta(days=days)
+            sibling.save(update_fields=['deadline', 'updated_at'])
+    task.refresh_from_db(fields=['deadline'])
+    label = task.batch_display_title if len(siblings) > 1 else task.title
+    if len(siblings) > 1:
+        messages.success(
+            request,
+            f'Đã gia hạn nhóm việc "{label}" thêm {days} ngày '
+            f'({len(siblings)} nhiệm vụ; hạn mới: {task.deadline.strftime("%d/%m/%Y")}).',
+        )
+    else:
+        messages.success(
+            request,
+            f'Đã gia hạn "{label}" thêm {days} ngày (hạn mới: {task.deadline.strftime("%d/%m/%Y")}).',
+        )
     wants_json = (
         request.headers.get('X-Requested-With') == 'XMLHttpRequest'
         or 'application/json' in (request.headers.get('Accept') or '')
@@ -2096,6 +2153,7 @@ def manager_task_extend(request, pk):
             'deadline': task.deadline.isoformat(),
             'deadline_display': task.deadline.strftime('%d/%m/%Y'),
             'days': days,
+            'batch_count': len(siblings),
         })
     return redirect('manager_manage_tasks')
 
@@ -2104,9 +2162,21 @@ def manager_task_extend(request, pk):
 @require_POST
 def manager_task_delete(request, pk):
     task = _get_managed_task_or_403(request.user, pk)
-    title = task.title
-    task.delete()
-    messages.success(request, f'Đã xóa công việc "{title}".')
+    siblings = _managed_batch_siblings(request.user, task)
+    if len(siblings) > 1:
+        title = task.batch_display_title
+        count = len(siblings)
+        with transaction.atomic():
+            for sibling in siblings:
+                sibling.delete()
+        messages.success(
+            request,
+            f'Đã xóa nhóm việc "{title}" ({count} nhiệm vụ).',
+        )
+    else:
+        title = task.title
+        task.delete()
+        messages.success(request, f'Đã xóa công việc "{title}".')
     return redirect('manager_manage_tasks')
 
 
