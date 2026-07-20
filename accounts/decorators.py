@@ -38,6 +38,28 @@ def can_assign_required(view_func):
     return _wrapped
 
 
+def assigner_required(view_func):
+    """
+    Ban Giám đốc hoặc Tổ chuyên môn — danh sách / chi tiết việc đã giao.
+    Staff không có quyền (403). Phạm vi dữ liệu lọc thêm trong view.
+    """
+
+    @wraps(view_func)
+    @login_required
+    def _wrapped(request, *args, **kwargs):
+        user = request.user
+        if not (
+            getattr(user, 'is_director', False)
+            or getattr(user, 'is_manager', False)
+            or getattr(user, 'is_department', False)
+            or user.can_assign_tasks()
+        ):
+            raise PermissionDenied('Bạn không có quyền xem công việc đã giao.')
+        return view_func(request, *args, **kwargs)
+
+    return _wrapped
+
+
 def staff_required(view_func):
     """Chỉ Nhân viên (không phải Lãnh đạo) hoặc cho phép cả hai xem khu vực cá nhân."""
 

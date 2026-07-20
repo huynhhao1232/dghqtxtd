@@ -1060,9 +1060,43 @@ class RoleBasedAccessControlTestCase(TestCase):
             'assignees': [self.staff_user.pk],
         })
         self.assertEqual(post.status_code, 302)
+        self.assertIn(reverse('manager_manage_tasks'), post.url)
         task = Task.objects.get(title=title)
         self.assertEqual(task.created_by_id, self.dept_user.pk)
         self.assertTrue(task.assignments.filter(assignee=self.staff_user).exists())
+
+    def test_department_can_list_managed_tasks_scoped(self):
+        mine = Task.objects.create(
+            title='Tổ đã giao',
+            created_by=self.dept_user,
+            deadline=self.today + timedelta(days=3),
+            cycle=Task.CYCLE_MONTH,
+        )
+        TaskAssignment.objects.create(task=mine, assignee=self.staff_user)
+        others = Task.objects.create(
+            title='BGH đã giao',
+            created_by=self.director,
+            deadline=self.today + timedelta(days=3),
+            cycle=Task.CYCLE_MONTH,
+        )
+        TaskAssignment.objects.create(task=others, assignee=self.other_staff)
+
+        self.client.force_login(self.dept_user)
+        resp = self.client.get(reverse('manager_manage_tasks'))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Tổ đã giao')
+        self.assertNotContains(resp, 'BGH đã giao')
+        self.assertContains(resp, 'Công việc đã giao')
+
+        detail = self.client.get(reverse('manager_task_detail', args=[mine.pk]))
+        self.assertEqual(detail.status_code, 200)
+        forbidden = self.client.get(reverse('manager_task_detail', args=[others.pk]))
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_staff_cannot_access_manage_tasks(self):
+        self.client.force_login(self.staff_user)
+        resp = self.client.get(reverse('manager_manage_tasks'))
+        self.assertEqual(resp.status_code, 403)
 
     def test_list_isolation(self):
         from tasks.views import _manager_tasks_queryset, _staff_assignments_qs

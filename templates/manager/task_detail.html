@@ -155,7 +155,7 @@
                             {% endif %}
                         </td>
                         <td class="px-5 py-4 text-right">
-                            {% if a.status == 'pending_review' %}
+                            {% if a.status == 'pending_review' and request.user.is_director %}
                             <button type="button"
                                     class="btn-grade inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-white hover:bg-blue-800"
                                     data-assignment-id="{{ a.pk }}"

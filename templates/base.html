@@ -75,6 +75,12 @@
                 <a href="{% url 'staff_my_tasks' %}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {% if request.resolver_match.url_name == 'staff_task_detail' or request.resolver_match.url_name == 'staff_my_tasks' %}bg-blue-50 text-primary{% else %}text-gray-600 hover:bg-gray-100 hover:text-gray-900{% endif %}">
                     <i class="fas fa-clipboard-list w-6"></i> Việc của tôi
                 </a>
+                {% if user.is_department %}
+                <p class="px-3 pt-4 pb-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">Quản lý</p>
+                <a href="{% url 'manager_manage_tasks' %}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {% if request.resolver_match.url_name == 'manager_manage_tasks' or request.resolver_match.url_name == 'manager_task_edit' or request.resolver_match.url_name == 'manager_task_detail' %}bg-blue-50 text-primary{% else %}text-gray-600 hover:bg-gray-100 hover:text-gray-900{% endif %}">
+                    <i class="fas fa-list-check w-6"></i> Công việc đã giao
+                </a>
+                {% endif %}
                 {% endif %}
 
                 {% if sidebar_departments %}

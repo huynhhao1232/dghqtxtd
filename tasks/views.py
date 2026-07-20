@@ -15,7 +15,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 from openpyxl import Workbook
 
-from accounts.decorators import can_assign_required, manager_required
+from accounts.decorators import assigner_required, can_assign_required, manager_required
 from accounts.models import Department, User
 
 from .forms import (
@@ -1151,7 +1151,8 @@ def manager_create_task(request):
         def _after_create_redirect(task):
             if request.user.is_director or request.user.is_manager:
                 return redirect('manager_task_detail', pk=task.pk)
-            return redirect('staff_my_tasks')
+            # Tổ chuyên môn → danh sách việc đã giao (scoped)
+            return redirect('manager_manage_tasks')
 
         try:
             if mode == TaskAssignForm.ASSIGN_BATCH_DEPARTMENT:
@@ -1223,7 +1224,7 @@ def manager_create_task(request):
                 messages.success(request, f'Đã giao việc "{task.title}" cho {count} nhân viên.')
             if request.user.is_director or request.user.is_manager:
                 return redirect('manager_create_task')
-            return redirect('staff_my_tasks')
+            return redirect('manager_manage_tasks')
         except OSError as exc:
             messages.error(request, _storage_upload_error_message(exc))
         except Exception as exc:
@@ -1427,7 +1428,25 @@ def _manager_tasks_queryset(user=None):
     ).distinct()
 
 
-@manager_required
+def _user_can_administer_managed_task(user, task):
+    """Director: mọi task gốc. Tổ chuyên môn: chỉ task trong phạm vi queryset của họ."""
+    if not user or not getattr(user, 'is_authenticated', False):
+        return False
+    if getattr(user, 'is_director', False) or getattr(user, 'is_manager', False):
+        return True
+    if getattr(user, 'is_department', False):
+        return _manager_tasks_queryset(user).filter(pk=task.pk).exists()
+    return False
+
+
+def _get_managed_task_or_403(user, pk):
+    task = get_object_or_404(Task, pk=pk, parent_task__isnull=True)
+    if not _user_can_administer_managed_task(user, task):
+        raise PermissionDenied('Bạn không có quyền quản lý công việc này.')
+    return task
+
+
+@assigner_required
 @require_http_methods(['GET'])
 def manager_manage_tasks(request):
     today = timezone.localdate()
@@ -1487,7 +1506,7 @@ def manager_manage_tasks(request):
     edit_form = None
     edit_task = None
     if edit_task_id and str(edit_task_id).isdigit():
-        edit_task = get_object_or_404(Task, pk=int(edit_task_id))
+        edit_task = _get_managed_task_or_403(request.user, int(edit_task_id))
         edit_form = TaskEditForm(instance=edit_task)
 
     return render(
@@ -1509,10 +1528,10 @@ def manager_manage_tasks(request):
     )
 
 
-@manager_required
+@assigner_required
 @require_http_methods(['POST'])
 def manager_task_edit(request, pk):
-    task = get_object_or_404(Task, pk=pk)
+    task = _get_managed_task_or_403(request.user, pk)
     form = TaskEditForm(request.POST, instance=task)
     if form.is_valid():
         form.save()
@@ -1522,10 +1541,10 @@ def manager_task_edit(request, pk):
     return redirect(f"{reverse('manager_manage_tasks')}?edit={pk}")
 
 
-@manager_required
+@assigner_required
 @require_POST
 def manager_task_extend(request, pk):
-    task = get_object_or_404(Task, pk=pk)
+    task = _get_managed_task_or_403(request.user, pk)
     try:
         days = int(request.POST.get('days', 3))
     except (TypeError, ValueError):
@@ -1552,10 +1571,10 @@ def manager_task_extend(request, pk):
     return redirect('manager_manage_tasks')
 
 
-@manager_required
+@assigner_required
 @require_POST
 def manager_task_delete(request, pk):
-    task = get_object_or_404(Task, pk=pk)
+    task = _get_managed_task_or_403(request.user, pk)
     title = task.title
     task.delete()
     messages.success(request, f'Đã xóa công việc "{title}".')
@@ -1665,9 +1684,10 @@ def manager_review_task(request, pk):
     )
 
 
-@manager_required
+@assigner_required
 @require_http_methods(['GET'])
 def manager_task_detail(request, pk):
+    allowed = _get_managed_task_or_403(request.user, pk)
     task = get_object_or_404(
         Task.objects.select_related('created_by', 'primary_department', 'primary_department__leader')
         .prefetch_related(
@@ -1688,7 +1708,7 @@ def manager_task_detail(request, pk):
                 ).order_by('pk'),
             ),
         ),
-        pk=pk,
+        pk=allowed.pk,
         parent_task__isnull=True,
     )
     all_assignments = list(task.assignments.all())
